@@ -157,9 +157,12 @@ export default function ProfileScreen({ onReplayTour, onOpenSub }) {
       {
         text: 'Delete my account', style: 'destructive', onPress: async () => {
           setBusy(true);
-          const { error } = await deleteAccount();
+          const { error, warning } = await deleteAccount();
           setBusy(false);
           if (error) Alert.alert('Failed', error.message);
+          // The account is gone either way, but a store subscription is not --
+          // say so before the sign-out navigates away, or they keep paying.
+          else if (warning) Alert.alert('Account deleted', warning);
           // On success the auth listener signs the user out and navigates away.
         },
       },

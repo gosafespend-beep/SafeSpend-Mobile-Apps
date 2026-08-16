@@ -242,12 +242,21 @@ export function AuthProvider({ children }) {
   const deleteAccount = async () => {
     const { data: { session: s } } = await supabase.auth.getSession();
     if (!s) return { error: new Error('Not signed in') };
-    const { error } = await supabase.functions.invoke('delete-account', {
+    const { data, error } = await supabase.functions.invoke('delete-account', {
       headers: { Authorization: `Bearer ${s.access_token}` },
     });
-    if (error) return { error };
+    if (error) {
+      // supabase-js hides the server's message inside the wrapped Response, and
+      // it is the part worth showing -- it says what the user has to do (cancel
+      // a subscription we could not cancel for them).
+      let detail = '';
+      try { detail = (await error.context?.json())?.message || ''; } catch { /* not JSON */ }
+      return { error: new Error(detail || error.message) };
+    }
     await supabase.auth.signOut();
-    return { error: null };
+    // A store subscription outlives the account -- Apple and Google bill it, so
+    // we cannot cancel it here and the user has to be told, not reassured.
+    return { error: null, warning: data?.store_subscription_active ? data.warning : null };
   };
 
   const provider = user?.app_metadata?.provider || 'email';
