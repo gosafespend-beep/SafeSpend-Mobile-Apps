@@ -1,0 +1,39 @@
+{
+  "cli": {
+    "version": ">= 5.0.0",
+    "appVersionSource": "local"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "ios": { "simulator": true }
+    },
+    "preview": {
+      "distribution": "internal",
+      "ios": { "simulator": true },
+      "android": { "buildType": "apk" }
+    },
+    "production": {
+      "autoIncrement": true,
+      "ios": {
+        "resourceClass": "m-medium"
+      },
+      "android": {
+        "buildType": "app-bundle"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "appleId": "samuelmakuthuluka@gmail.com",
+        "ascAppId": "6796527654",
+        "appleTeamId": "VWXKTW7K2H",
+        "ascApiKeyPath": "C:/safespend/keys/AuthKey_ZVA6Z8XDT8.p8",
+        "ascApiKeyId": "ZVA6Z8XDT8",
+        "ascApiKeyIssuerId": "cc820bc6-5652-4c72-a085-9b004b9f2275"
+      }
+    }
+  }
+}

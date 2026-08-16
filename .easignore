@@ -1,0 +1,16 @@
+# Exclude from EAS upload archive (EAS_NO_VCS mode)
+node_modules/
+.expo/
+dist/
+web-build/
+.git/
+ios/
+android/app/build/
+android/build/
+android/.gradle/
+*.log
+*.keystore
+*.jks
+*.p8
+*.p12
+*.mobileprovision
