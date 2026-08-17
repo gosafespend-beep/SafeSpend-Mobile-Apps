@@ -20,7 +20,7 @@
  * suites run.
  */
 
-export const CONTRACT_VERSION = 1;
+export const CONTRACT_VERSION = 2;
 
 export const STEPS_FULL = [
   'Welcome',
@@ -101,3 +101,28 @@ export const HANDOFF_KEYS = {
 };
 
 export const INTENTS = ['overspend', 'save', 'debt', 'track'];
+
+// --- Feel, not just structure ---------------------------------------------
+//
+// The flows agreed on steps and copy and still landed differently, because
+// nothing said what onboarding should sound or move like. This repo owned a
+// whole motion and celebration system -- AnimatedNumber, useAnimatedProgress,
+// Reveal, Confetti, haptics, and a duration token literally named `celebrate`
+// -- and the peak moment of the flow used none of it.
+
+export const MOTION_DURATIONS = { fast: 120, base: 220, slow: 420, celebrate: 700 };
+
+export const REQUIRED_MOTION = [
+  { at: 'Reveal', what: 'the Safe-to-Spend figure counts up', why: 'A number that lands instantly reads as a receipt' },
+  { at: 'every step', what: 'the progress bar fills', why: 'Jumping tells you a step changed; filling tells you how far you are' },
+  { at: 'every step', what: 'content rises in, directionally', why: 'Six hard cuts is what makes a flow feel like a form' },
+];
+
+export const REQUIRED_FEEDBACK = [
+  { at: 'Reveal', haptic: 'impact', why: 'The figure arriving deserves a beat; impact, not success' },
+  { at: 'First expense saved', haptic: 'success', celebrate: true, why: 'The habit the product depends on' },
+];
+
+// The one rule that is not a preference: when the number is negative, nothing
+// celebrates. No confetti, no success haptic, no glow, no bounce.
+export const NO_CELEBRATION_ON = 'danger';

@@ -1,9 +1,12 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { View, Text, Pressable, Image, ScrollView, Linking } from 'react-native';
+import { View, Text, Pressable, Image, ScrollView, Linking, Animated } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { c, hsl, ff, num, glow, alpha } from '../theme/tokens';
 import { Input, Button, Icon, Badge } from '../components';
+import { AnimatedNumber, useAnimatedProgress, Reveal as Rise } from '../components/motion';
+import { useCelebration } from '../contexts/CelebrationContext';
+import { haptics } from '../lib/haptics';
 import { SUPPORTED_CURRENCIES, money, currencySymbol } from '../lib/format';
 import { useAppLock, BIOMETRIC_LABEL } from '../contexts/AppLockContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -86,6 +89,7 @@ const CURRENCIES = SUPPORTED_CURRENCIES;
 
 export default function OnboardingScreen({ onComplete, topInset = 0, initialCurrency, intent, fromWelcome = false }) {
   const insets = useSafeAreaInsets();
+  const { celebrate } = useCelebration();
   const { supported: lockSupported, setEnabled: setLockEnabled } = useAppLock();
   const { user } = useAuth();
   const { region } = useRegion();
@@ -164,6 +168,13 @@ export default function OnboardingScreen({ onComplete, topInset = 0, initialCurr
   useEffect(() => {
     if (!restored) return;
     track('onboarding_step', { step: name, index: step });
+    /*
+     * A light tap when the figure arrives. The app already uses haptics for
+     * confirmations elsewhere; the one moment that most deserves it had none.
+     * Deliberately NOT success() -- that is reserved for something the user
+     * achieved, and a shortfall must not feel like a win.
+     */
+    if (name === 'Reveal' && reveal.hasInputs) haptics.impact();
   }, [name, restored]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // A user who walks away mid-setup is the drop-off we most need to see. The
@@ -192,6 +203,9 @@ export default function OnboardingScreen({ onComplete, topInset = 0, initialCurr
   };
 
   const progress = ((step + 1) / STEPS.length) * 100;
+  // Fills rather than jumping. useAnimatedProgress already honours
+  // prefers-reduced-motion internally, so no guard is needed here.
+  const progressAnim = useAnimatedProgress(progress);
   const symbol = currencySymbol(currency);
   const filtered = CURRENCIES.filter(
     (x) => !search || x.name.toLowerCase().includes(search.toLowerCase()) || x.code.toLowerCase().includes(search.toLowerCase()) || x.country.toLowerCase().includes(search.toLowerCase())
@@ -264,7 +278,17 @@ export default function OnboardingScreen({ onComplete, topInset = 0, initialCurr
     const firstExpense = firstAmt > 0
       ? { amount: firstAmt, description: firstDescription.trim() || 'First expense' }
       : null;
-    if (firstExpense) track('first_transaction', { where: 'onboarding', amount: firstAmt });
+    if (firstExpense) {
+      track('first_transaction', { where: 'onboarding', amount: firstAmt });
+      /*
+       * The habit the whole product depends on, and onboarding was the one
+       * path that reached it without saying anything. RootNavigator already
+       * celebrates a first transaction logged through the FAB; this is the
+       * same moment arriving by a different door.
+       */
+      haptics.success();
+      celebrate('First transaction logged! 🎉');
+    }
 
     track('onboarding_complete', {
       currency, intent: intent || null, notifsOn, lockOn,
@@ -295,7 +319,13 @@ export default function OnboardingScreen({ onComplete, topInset = 0, initialCurr
       {/* Progress */}
       <View style={{ marginBottom: 22 }}>
         <View style={{ height: 3, backgroundColor: c('surfaceSecondary'), borderRadius: 9999, overflow: 'hidden' }}>
-          <View style={{ width: `${progress}%`, height: '100%', backgroundColor: c('primary') }} />
+          <Animated.View
+            style={{
+              width: progressAnim.interpolate({ inputRange: [0, 100], outputRange: ['0%', '100%'] }),
+              height: '100%',
+              backgroundColor: c('primary'),
+            }}
+          />
         </View>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
           {STEPS.map((s, i) => (
@@ -469,9 +499,20 @@ export default function OnboardingScreen({ onComplete, topInset = 0, initialCurr
                       {reveal.status === 'danger' ? 'Shortfall' : reveal.status === 'caution' ? 'Caution' : 'Healthy'}
                     </Badge>
                   </View>
-                  <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} maxFontSizeMultiplier={1.3} style={[num(700), { fontSize: 38, letterSpacing: -0.5, color: c('primary') }]}>
-                    {m(reveal.availableToSpend)}
-                  </Text>
+                  {/*
+                      * Counts up rather than appearing. This is the moment the
+                      * whole flow builds to, and a number that lands instantly
+                      * reads as a receipt. duration.slow with easing.decelerate
+                      * is what AnimatedNumber already uses -- the easing the
+                      * theme annotates as "things arriving (count-ups, fills)".
+                      */}
+                    <AnimatedNumber
+                      value={reveal.availableToSpend}
+                      format={m}
+                      numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}
+                      maxFontSizeMultiplier={1.3}
+                      style={[num(700), { fontSize: 38, letterSpacing: -0.5, color: c('primary') }]}
+                    />
                   {reveal.dailySafe > 0 ? (
                     <Text maxFontSizeMultiplier={1.3} style={[num(500), { fontSize: 13, color: c('primary'), marginTop: 4 }]}>
                       {`≈ ${m(reveal.dailySafe)}/day for the next ${reveal.daysRemaining} day${reveal.daysRemaining === 1 ? '' : 's'}`}

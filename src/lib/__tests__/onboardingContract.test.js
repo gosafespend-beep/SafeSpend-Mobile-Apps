@@ -102,6 +102,49 @@ describe('onboarding contract — versioning', () => {
     // The tripwire for the gap a mirrored contract cannot close on its own:
     // two repos, two toolchains, no shared package. A different number on the
     // other side means one was edited alone.
-    expect(contract.CONTRACT_VERSION).toBe(1);
+    expect(contract.CONTRACT_VERSION).toBe(2);
+  });
+});
+
+describe('onboarding contract — feel', () => {
+  it('uses the durations the theme already defines', () => {
+    // Same numbers as the web mirror. "slow" must mean 420ms on both surfaces
+    // or they cannot converge on feel even once steps and copy agree.
+    expect(contract.MOTION_DURATIONS.slow).toBe(420);
+    expect(contract.MOTION_DURATIONS.celebrate).toBe(700);
+  });
+
+  it('counts the Safe-to-Spend figure up rather than printing it', () => {
+    // The peak moment of the flow was static text while AnimatedNumber sat
+    // unused in the same repo.
+    expect(screen).toContain('<AnimatedNumber');
+    expect(screen).toContain('reveal.availableToSpend');
+  });
+
+  it('fills the progress bar instead of jumping it', () => {
+    expect(screen).toContain('useAnimatedProgress');
+  });
+
+  it('is felt at the two moments that matter', () => {
+    // impact when the figure arrives; success only for something achieved.
+    expect(screen).toContain('haptics.impact()');
+    expect(screen).toContain('haptics.success()');
+    expect(screen).toContain('celebrate(');
+  });
+
+  it('never celebrates a shortfall', () => {
+    /*
+     * Not a preference. A delight pass adds glow and bounce everywhere without
+     * noticing, and sparkling at someone while telling them they cannot cover
+     * rent loses them for good. The haptic on the Reveal is gated on
+     * hasInputs and is impact, never success.
+     */
+    expect(contract.NO_CELEBRATION_ON).toBe('danger');
+    const revealHaptic = screen.slice(
+      screen.indexOf("if (name === 'Reveal'"),
+      screen.indexOf("if (name === 'Reveal'") + 120,
+    );
+    expect(revealHaptic).toContain('haptics.impact()');
+    expect(revealHaptic).not.toContain('haptics.success()');
   });
 });
