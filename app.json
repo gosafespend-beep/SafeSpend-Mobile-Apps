@@ -2,7 +2,7 @@
   "expo": {
     "name": "Safe Spend",
     "slug": "safespend-mobile",
-    "version": "2.1.8",
+    "version": "2.2.0",
     "newArchEnabled": true,
     "orientation": "portrait",
     "icon": "./assets/icon.png",
