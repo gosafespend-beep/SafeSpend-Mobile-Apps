@@ -5,6 +5,7 @@ import { useAuth } from './AuthContext';
 import { useRefresh } from './RefreshContext';
 import { useSettings } from './SettingsContext';
 import { useFx } from './FxContext';
+import { buildAttention } from '../lib/attention';
 
 /**
  * "Needs attention" feed — a single, app-wide aggregation of the things a user
@@ -27,7 +28,6 @@ export function AttentionProvider({ children }) {
   const load = useCallback(async () => {
     if (!user) { setItems([]); return; }
     const now = new Date();
-    const today = now.getDate();
     const month = now.getMonth();
     const year = now.getFullYear();
     const monthStart = toLocalISODate(new Date(year, month, 1));
@@ -54,20 +54,9 @@ export function AttentionProvider({ children }) {
       const cvt = (amount, accId) => convert(Number(amount || 0), acctCur[accId] || displayCur, displayCur);
       const rowCvt = (amount, cur) => convert(Number(amount || 0), cur || displayCur, displayCur);
 
-      const out = [];
-
-      // Bills — overdue and due-soon (unpaid).
       const paidIds = new Set((statusRes.data || []).filter((s) => s.is_paid).map((s) => s.bill_id));
-      (billsRes.data || []).forEach((b) => {
-        if (paidIds.has(b.id)) return;
-        if (b.due_day < today) {
-          out.push({ id: `bill-od-${b.id}`, type: 'overdue', priority: 0, icon: 'alertTriangle', tone: 'expense', title: `${b.name} is overdue`, subtitle: `Due on the ${b.due_day}${nth(b.due_day)} · tap to pay`, nav: 'bills' });
-        } else if (b.due_day <= today + 3) {
-          out.push({ id: `bill-soon-${b.id}`, type: 'due', priority: 2, icon: 'calendar', tone: 'warning', title: `${b.name} due soon`, subtitle: b.due_day === today ? 'Due today' : `Due in ${b.due_day - today} day${b.due_day - today === 1 ? '' : 's'}`, nav: 'bills' });
-        }
-      });
 
-      // Over-budget categories this month.
+      // Category names, needed to line budgets up with spend below.
       const nameById = {};
       (catsRes.data || []).forEach((cat) => { nameById[cat.id] = cat.name; });
       const budgetByName = {};
@@ -78,33 +67,30 @@ export function AttentionProvider({ children }) {
         if (!key) return;
         spentByName[key] = (spentByName[key] || 0) + cvt(e.amount, e.account_id);
       });
-      Object.keys(budgetByName).forEach((name) => {
-        const limit = budgetByName[name];
-        const spent = spentByName[name] || 0;
-        if (limit > 0 && spent > limit) {
-          out.push({ id: `budget-${name}`, type: 'budget', priority: 1, icon: 'scale', tone: 'expense', title: `Over budget on ${name}`, subtitle: 'Tap to review your budget', nav: 'budget' });
-        }
-      });
-
-      // Goals with a deadline coming up that aren't done.
-      (goalsRes.data || []).forEach((g, i) => {
-        const target = Number(g.target_amount || 0);
-        const current = Number(g.current_amount || 0);
-        if (target > 0 && current >= target) return;
-        if (!g.deadline) return;
-        const days = Math.ceil((new Date(g.deadline + 'T00:00:00') - now) / 86400000);
-        if (days >= 0 && days <= 21) {
-          out.push({ id: `goal-${i}`, type: 'goal', priority: 3, icon: 'target', tone: 'primary', title: `“${g.name}” deadline near`, subtitle: days === 0 ? 'Due today' : `${days} day${days === 1 ? '' : 's'} left to hit your target`, nav: 'goals' });
-        }
-      });
-
-      // Unverified email.
-      if (!isEmailVerified) {
-        out.push({ id: 'email', type: 'email', priority: 4, icon: 'bell', tone: 'warning', title: 'Verify your email', subtitle: 'Confirm your address to secure your account', nav: 'profile' });
-      }
-
-      out.sort((a, b) => a.priority - b.priority);
-      setItems(out);
+      /*
+       * The rules live in lib/attention.js, shared with the web app.
+       *
+       * This function used to contain them inline, and web had no feed at all.
+       * Now that both surfaces show one, two copies of "what counts as overdue"
+       * would drift silently — so everything above is FETCHING and currency
+       * normalisation, and everything below is the shared decision.
+       */
+      setItems(buildAttention({
+        today: now,
+        bills: (billsRes.data || []).map((b) => ({
+          id: b.id, name: b.name, dueDay: b.due_day, isPaid: paidIds.has(b.id),
+        })),
+        budgets: Object.keys(budgetByName).map((name) => ({
+          category: name, limit: budgetByName[name], spent: spentByName[name] || 0,
+        })),
+        goals: (goalsRes.data || []).map((g) => ({
+          name: g.name,
+          target: Number(g.target_amount || 0),
+          current: Number(g.current_amount || 0),
+          deadline: g.deadline,
+        })),
+        emailVerified: isEmailVerified,
+      }));
     } catch {
       // Attention is best-effort — never block the app on it.
     }
@@ -113,11 +99,6 @@ export function AttentionProvider({ children }) {
   useEffect(() => { load(); }, [load, tick]);
 
   return <AttentionContext.Provider value={{ items, count: items.length, reload: load }}>{children}</AttentionContext.Provider>;
-}
-
-function nth(d) {
-  if (d >= 11 && d <= 13) return 'th';
-  return { 1: 'st', 2: 'nd', 3: 'rd' }[d % 10] || 'th';
 }
 
 export function useAttention() {

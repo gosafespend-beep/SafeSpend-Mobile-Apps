@@ -423,13 +423,22 @@ function AppNavigator({ replayTour }) {
           </Shell>
         )}
       </Stack.Screen>
-      <Stack.Screen name="states">
-        {() => (
-          <Shell title="States gallery" back>
-            <StatesScreen />
-          </Shell>
-        )}
-      </Stack.Screen>
+      {/*
+        A QA gallery of every loading and empty state, useful while building
+        them and meaningless to a user. Nothing navigates to it, but it was
+        registered unconditionally — so it shipped in the production bundle and
+        stayed reachable by anyone who found the route name through the
+        `safespend://` scheme. Development only now.
+      */}
+      {__DEV__ ? (
+        <Stack.Screen name="states">
+          {() => (
+            <Shell title="States gallery" back>
+              <StatesScreen />
+            </Shell>
+          )}
+        </Stack.Screen>
+      ) : null}
 
       {/* Detail screens */}
       <Stack.Screen name="txn">
