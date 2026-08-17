@@ -87,7 +87,7 @@ function BreakdownRow({ label, value, tone, sign }) {
 
 const CURRENCIES = SUPPORTED_CURRENCIES;
 
-export default function OnboardingScreen({ onComplete, topInset = 0, initialCurrency, intent, fromWelcome = false }) {
+export default function OnboardingScreen({ onComplete, topInset = 0, initialCurrency, intents = [], fromWelcome = false }) {
   const insets = useSafeAreaInsets();
   const { celebrate } = useCelebration();
   const { supported: lockSupported, setEnabled: setLockEnabled } = useAppLock();

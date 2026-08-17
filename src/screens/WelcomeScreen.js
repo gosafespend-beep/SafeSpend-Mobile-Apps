@@ -43,7 +43,14 @@ const VALUE_PROPS = [
 export default function WelcomeScreen({ onDone, topInset = 0 }) {
   const insets = useSafeAreaInsets();
   const [step, setStep] = useState(0);
-  const [intent, setIntent] = useState(null);
+  /*
+   * Plural on purpose. People arrive with more than one reason -- paying off a
+   * card AND trying to stop overspending is the normal case. Headspace found
+   * that letting users pick several instead of forcing one lifted free trial
+   * conversion by 10%, and forcing a single choice also throws away the second
+   * answer, which the dashboard could have used.
+   */
+  const [intents, setIntents] = useState([]);
   const [currency, setCurrency] = useState(() => guessCurrency(SUPPORTED_CURRENCIES.map((x) => x.code)));
   const [search, setSearch] = useState('');
   // Region resolves asynchronously (and can come from a stored override, not just
@@ -81,11 +88,12 @@ export default function WelcomeScreen({ onDone, topInset = 0 }) {
       await AsyncStorage.multiSet([
         [WELCOME_SEEN_KEY, 'true'],
         [PRE_CURRENCY_KEY, currency],
-        ...(intent ? [[INTENT_KEY, intent]] : []),
+        // Comma-separated, matching web, so an older single-value key still reads.
+        ...(intents.length ? [[INTENT_KEY, intents.join(',')]] : []),
       ]);
     } catch { /* best-effort; the gate still advances */ }
-    track('welcome_complete', { intent, currency, mode });
-    onDone && onDone(mode, { currency, intent });
+    track('welcome_complete', { intents: intents.join(','), count: intents.length, currency, mode });
+    onDone && onDone(mode, { currency, intents });
   };
 
   // Continue only advances through the pre-auth steps; the final CTA is explicit.
@@ -134,9 +142,9 @@ export default function WelcomeScreen({ onDone, topInset = 0 }) {
             </View>
             <View style={{ gap: 10 }}>
               {INTENTS.map((it) => {
-                const active = intent === it.key;
+                const active = intents.includes(it.key);
                 return (
-                  <Pressable key={it.key} onPress={() => setIntent(it.key)} accessibilityRole="button" accessibilityState={{ selected: active }} style={{ flexDirection: 'row', alignItems: 'center', gap: 14, padding: 15, borderRadius: 13, borderWidth: 2, borderColor: active ? c('primary') : c('border'), backgroundColor: active ? c('primary', 0.07) : c('surface') }}>
+                  <Pressable key={it.key} onPress={() => setIntents((prev) => prev.includes(it.key) ? prev.filter((i) => i !== it.key) : [...prev, it.key])} accessibilityRole="button" accessibilityState={{ selected: active }} style={{ flexDirection: 'row', alignItems: 'center', gap: 14, padding: 15, borderRadius: 13, borderWidth: 2, borderColor: active ? c('primary') : c('border'), backgroundColor: active ? c('primary', 0.07) : c('surface') }}>
                     <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: alpha(hsl(it.tone), 0.16), alignItems: 'center', justifyContent: 'center' }}>
                       <Icon name={it.icon} size={20} color={hsl(it.tone)} />
                     </View>
@@ -224,7 +232,7 @@ export default function WelcomeScreen({ onDone, topInset = 0 }) {
           <View style={{ flexDirection: 'row', gap: 10 }}>
             {step > 0 ? <View style={{ flex: 1 }}><Button block size="lg" variant="outline" onPress={() => setStep(step - 1)}>Back</Button></View> : null}
             <View style={{ flex: step > 0 ? 1.4 : 1 }}>
-              <Button block size="lg" onPress={next} disabled={name === 'Goal' && !intent}>Continue</Button>
+              <Button block size="lg" onPress={next} disabled={name === 'Goal' && intents.length === 0}>Continue</Button>
             </View>
           </View>
         )}

@@ -492,19 +492,19 @@ export default function RootNavigator() {
 
   // Pre-auth welcome: shown before AuthScreen for brand-new users so they meet
   // the product (and pick intent + currency) before hitting a sign-up wall.
-  const [welcome, setWelcome] = useState({ checked: false, seen: false, currency: null, intent: null, authMode: 'signin' });
+  const [welcome, setWelcome] = useState({ checked: false, seen: false, currency: null, intents: [], authMode: 'signin' });
   useEffect(() => {
     let active = true;
     AsyncStorage.multiGet([WELCOME_SEEN_KEY, PRE_CURRENCY_KEY, INTENT_KEY])
       .then((pairs) => {
         if (!active) return;
         const map = Object.fromEntries(pairs);
-        setWelcome((w) => ({ ...w, checked: true, seen: map[WELCOME_SEEN_KEY] === 'true', currency: map[PRE_CURRENCY_KEY] || null, intent: map[INTENT_KEY] || null }));
+        setWelcome((w) => ({ ...w, checked: true, seen: map[WELCOME_SEEN_KEY] === 'true', currency: map[PRE_CURRENCY_KEY] || null, intents: (map[INTENT_KEY] || '').split(',').filter(Boolean) }));
       })
       .catch(() => { if (active) setWelcome((w) => ({ ...w, checked: true })); });
     return () => { active = false; };
   }, []);
-  const finishWelcome = (mode, data) => setWelcome((w) => ({ ...w, seen: true, authMode: mode || 'signin', currency: data?.currency || w.currency, intent: data?.intent || w.intent }));
+  const finishWelcome = (mode, data) => setWelcome((w) => ({ ...w, seen: true, authMode: mode || 'signin', currency: data?.currency || w.currency, intents: data?.intents || w.intents }));
 
   // Auto-create any recurring transactions that have come due (once per sign-in).
   const { bump } = useRefresh();
@@ -647,7 +647,7 @@ export default function RootNavigator() {
         onComplete={handleOnboardingComplete}
         topInset={insets.top}
         initialCurrency={welcome.currency}
-        intent={welcome.intent}
+        intents={welcome.intents}
         fromWelcome={!!welcome.currency}
       />
     );
