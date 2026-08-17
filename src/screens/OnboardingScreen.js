@@ -2,9 +2,10 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { View, Text, Pressable, ScrollView, Linking, Animated } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { c, ff, num, alpha } from '../theme/tokens';
-import { Input, Button, Icon, Badge } from '../components';
+import { Button, Icon, Badge } from '../components';
 import { AnimatedNumber, useAnimatedProgress, Reveal as Rise } from '../components/motion';
-import { AmountField, DayField, ChoiceField, MultiField, ForkField } from '../components/OnboardingFields';
+import { AmountField, DayField, ChoiceField, MultiField, ForkField, NameField } from '../components/OnboardingFields';
+import OnboardingScene from '../components/OnboardingScene';
 import { SUPPORTED_CURRENCIES, money, currencySymbol } from '../lib/format';
 import { useAppLock } from '../contexts/AppLockContext';
 import { useCelebration } from '../contexts/CelebrationContext';
@@ -15,7 +16,8 @@ import { haptics } from '../lib/haptics';
 import { track } from '../lib/analytics';
 import {
   stepsFor, ACCOUNT_OPTIONS, FREQUENCY_OPTIONS, OVERSPEND_CATEGORIES,
-  reflect, reflectDay, BUILDING_LINES,
+  reflect, reflectDay, BUILDING_LINES, CHAPTERS,
+  BILL_SUGGESTIONS, FIRST_EXPENSE_SUGGESTIONS,
 } from '../lib/onboardingSteps';
 
 /**
@@ -74,7 +76,17 @@ export default function OnboardingScreen({ onComplete, topInset = 0, initialCurr
   const step = steps[Math.min(index, steps.length - 1)];
   const isLast = index >= steps.length - 1;
 
-  const progress = ((index + 1) / steps.length) * 100;
+  /*
+   * Progress within the current chapter, not across the whole flow.
+   *
+   * The bar has one segment per chapter, so what it needs is how far through
+   * this act you are — measured against the steps sharing this chapter in the
+   * PRUNED sequence, so a fork that removes three screens shortens the segment
+   * rather than stalling it.
+   */
+  const chapterSteps = step ? steps.filter((s) => s.chapter === step.chapter) : [];
+  const posInChapter = step ? chapterSteps.findIndex((s) => s.id === step.id) : 0;
+  const progress = ((posInChapter + 1) / Math.max(1, chapterSteps.length)) * 100;
   const progressAnim = useAnimatedProgress(progress);
 
   /**
@@ -93,12 +105,59 @@ export default function OnboardingScreen({ onComplete, topInset = 0, initialCurr
       liquidBalance: liquid,
       bills: bill > 0 ? [{ id: 'onb', name: billName.trim() || 'Fixed bill', amount: bill, due_day: billDay || 1, is_active: true }] : [],
       billStatuses: [],
-      goals: numOr0(goalTarget) > 0 ? [{ target_amount: numOr0(goalTarget), current_amount: 0, deadline: null }] : [],
+      // A deadline, not null: computeAvailableToSpend skips any goal without
+      // one, so passing null made the reveal reserve nothing while the
+      // dashboard — seconds later — reserved target/6. On a 3,000 goal that is
+      // a 500 drop between the last onboarding screen and the first real one,
+      // which reads as the product having lied about the number it just spent
+      // twenty screens computing.
+      goals: numOr0(goalTarget) > 0
+        ? [{ target_amount: numOr0(goalTarget), current_amount: 0, deadline: goalDeadline(DEFAULT_GOAL_MONTHS) }]
+        : [],
       recurring: inc > 0 ? [{ type: 'income', amount: inc, is_active: true, next_due: nextDue(payday || 1), description: 'Income' }] : [],
       avgDailySpend: 0,
     });
     return { ...res, hasInputs: liquid > 0 || inc > 0 || bill > 0 };
   }, [accountType, balance, income, payday, billName, billAmount, billDay, goalTarget]);
+
+  /**
+   * The floating values over the illustration.
+   *
+   * The detail that separates the reference flows from a form: what you just
+   * typed, shown back on the picture. Capped at two — three is a dashboard —
+   * and the running figure is suppressed when it would repeat the chip above
+   * it, which happens on the balance screen before any income is entered.
+   */
+  const chips = useMemo(() => {
+    const out = [];
+    if (!step) return out;
+    const ordinal = (n) => (n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th');
+
+    if (step.id === 'balance' && numOr0(balance) > 0) {
+      out.push({ label: 'In the account', value: m(numOr0(balance)), tone: c('primary') });
+    }
+    if ((step.id === 'income' || step.id === 'pay-frequency') && numOr0(income) > 0) {
+      out.push({ label: 'Each month', value: `+${m(numOr0(income))}`, tone: c('income') });
+    }
+    if (step.id === 'payday' && payday) {
+      out.push({ label: 'Payday', value: `${payday}${ordinal(payday)}`, tone: c('income') });
+    }
+    if (step.id.indexOf('bill-') === 0 && numOr0(billAmount) > 0) {
+      out.push({ label: billName.trim() || 'Bill', value: `−${m(numOr0(billAmount))}`, tone: c('expense') });
+    }
+    if (step.id === 'goal-detail' && numOr0(goalTarget) > 0) {
+      out.push({ label: 'Per month', value: m(numOr0(goalTarget) / DEFAULT_GOAL_MONTHS), tone: c('savings') });
+    }
+    if (step.id === 'debt-detail' && numOr0(debtAmount) > 0) {
+      out.push({ label: 'Left to pay', value: m(numOr0(debtAmount)), tone: c('expense') });
+    }
+    const running = m(reveal.availableToSpend);
+    if (reveal.hasInputs && step.id !== 'reveal' && step.kind !== 'compute'
+        && out.length < 2 && !out.some((x) => x.value === running)) {
+      out.push({ label: 'Safe to spend', value: running, tone: c('primary') });
+    }
+    return out;
+  }, [step && step.id, balance, income, payday, billName, billAmount, goalTarget, debtAmount, reveal]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ---------------------------------------------------------- telemetry -- */
 
@@ -217,9 +276,13 @@ export default function OnboardingScreen({ onComplete, topInset = 0, initialCurr
     switch (step.id) {
       case 'intro':
         return (
-          <Text maxFontSizeMultiplier={1.3} style={{ fontSize: 13, color: c('fgMuted'), textAlign: 'center', lineHeight: 19 }}>
-            Nothing you enter leaves your account, and we never ask for a bank login.
-          </Text>
+          // Left-aligned, in a panel. Centring one paragraph inside a
+          // left-aligned card gives the screen two competing axes.
+          <View style={{ backgroundColor: alpha(c('surfaceSecondary'), 0.6), borderRadius: 12, borderWidth: 1, borderColor: c('border'), padding: 14 }}>
+            <Text maxFontSizeMultiplier={1.3} style={{ fontSize: 13, color: c('fgMuted'), lineHeight: 19 }}>
+              Nothing you enter leaves your account, and we never ask for a bank login.
+            </Text>
+          </View>
         );
 
       case 'currency':
@@ -254,7 +317,8 @@ export default function OnboardingScreen({ onComplete, topInset = 0, initialCurr
         return <ForkField value={hasBill} onChange={setHasBill} yesLabel="Yes, I do" noLabel="Not really" />;
 
       case 'bill-name':
-        return <Input autoFocus placeholder="Rent, car loan, childcare…" value={billName} onChange={setBillName} />;
+        return <NameField autoFocus value={billName} onChange={setBillName}
+          placeholder="Rent" suggestions={BILL_SUGGESTIONS} />;
 
       case 'bill-amount':
         return <AmountField autoFocus value={billAmount} onChange={setBillAmount} symbol={symbol}
@@ -354,7 +418,8 @@ export default function OnboardingScreen({ onComplete, topInset = 0, initialCurr
         return <AmountField autoFocus value={firstAmount} onChange={setFirstAmount} symbol={symbol} />;
 
       case 'first-what':
-        return <Input autoFocus placeholder="Coffee, bus fare, lunch…" value={firstWhat} onChange={setFirstWhat} />;
+        return <NameField autoFocus value={firstWhat} onChange={setFirstWhat}
+          placeholder="Coffee" suggestions={FIRST_EXPENSE_SUGGESTIONS} />;
 
       default:
         return null;
@@ -363,26 +428,92 @@ export default function OnboardingScreen({ onComplete, topInset = 0, initialCurr
 
   if (!step) return null;
 
+  const sceneVariant = reveal.status === 'danger' ? 'steady' : reveal.status === 'caution' ? 'caution' : 'safe';
+
   return (
-    <View style={{ flex: 1, backgroundColor: c('bg'), paddingTop: topInset + 30, paddingHorizontal: 20, paddingBottom: insets.bottom + 24 }}>
-      <View style={{ marginBottom: 22 }}>
-        <View style={{ height: 3, backgroundColor: c('surfaceSecondary'), borderRadius: 9999, overflow: 'hidden' }}>
-          <Animated.View style={{
-            width: progressAnim.interpolate({ inputRange: [0, 100], outputRange: ['0%', '100%'] }),
-            height: '100%',
-            backgroundColor: c('primary'),
-          }} />
+    <View style={{ flex: 1, backgroundColor: c('bg'), paddingTop: topInset + 14, paddingBottom: insets.bottom + 16 }}>
+      {/* Progress, chapter and Skip ride above the picture, as on web. */}
+      <View style={{ paddingHorizontal: 20 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          <View style={{ flex: 1, flexDirection: 'row', gap: 6 }}>
+            {CHAPTERS.map((name, i) => (
+              <View key={name} style={{ flex: 1, height: 3, borderRadius: 9999, backgroundColor: c('surfaceSecondary'), overflow: 'hidden' }}>
+                {i < step.chapter ? (
+                  <View style={{ width: '100%', height: '100%', backgroundColor: c('primary') }} />
+                ) : i === step.chapter ? (
+                  <Animated.View style={{
+                    width: progressAnim.interpolate({ inputRange: [0, 100], outputRange: ['0%', '100%'] }),
+                    height: '100%',
+                    backgroundColor: c('primary'),
+                  }} />
+                ) : null}
+              </View>
+            ))}
+          </View>
+          {/* Persistent, not first-screen-only: someone looking for a way out
+              at screen fourteen looks here, not at the bottom of screen one.
+              Padded to a 44pt target rather than sized to its text. */}
+          {step.kind !== 'compute' ? (
+            <Pressable onPress={skip} accessibilityRole="button" accessibilityLabel="Skip setup"
+              hitSlop={12} style={{ paddingVertical: 12, paddingHorizontal: 4 }}>
+              <Text style={{ color: c('fgMuted'), fontSize: 13 }}>Skip</Text>
+            </Pressable>
+          ) : null}
         </View>
+        <Text maxFontSizeMultiplier={1.2} style={{
+          marginTop: 8, fontSize: 11, letterSpacing: 1.4, textTransform: 'uppercase',
+          fontFamily: ff.semi, color: alpha(c('primary'), 0.75),
+        }}>
+          {CHAPTERS[step.chapter]}
+        </Text>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 20 }}>
+      {/*
+        The picture, and the values it carries.
+
+        This is the half of the screen the old layout did not have: it opened
+        straight onto a heading and a control, which is a form with a progress
+        bar on top. Height is fixed so the mascot does not change size between
+        screens — the renders came back at differing aspects.
+      */}
+      <View style={{ height: 186, justifyContent: 'center', marginTop: 6 }}>
+        <OnboardingScene stepId={step.id} variant={sceneVariant} height={172} />
+        {chips.slice(0, 2).map((chip, i) => (
+          <View
+            key={chip.label}
+            style={{
+              position: 'absolute',
+              left: i === 0 ? 16 : undefined,
+              right: i === 0 ? undefined : 16,
+              top: i === 0 ? 14 : undefined,
+              bottom: i === 0 ? undefined : 14,
+              flexDirection: 'row', alignItems: 'center', gap: 9,
+              backgroundColor: c('surface'), borderRadius: 12, borderWidth: 1, borderColor: c('border'),
+              paddingHorizontal: 11, paddingVertical: 8,
+            }}
+          >
+            <View style={{ width: 3, height: 22, borderRadius: 999, backgroundColor: chip.tone }} />
+            <View>
+              <Text maxFontSizeMultiplier={1.1} style={{ fontSize: 9, letterSpacing: 0.8, textTransform: 'uppercase', color: c('fgMuted') }}>
+                {chip.label}
+              </Text>
+              <Text maxFontSizeMultiplier={1.1} style={[num(600), { fontSize: 13, color: chip.tone, marginTop: 2 }]}>
+                {chip.value}
+              </Text>
+            </View>
+          </View>
+        ))}
+      </View>
+
+      <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{ paddingBottom: 20, paddingHorizontal: 20 }}>
         <Rise key={step.id} y={8}>
-          <View style={{ alignItems: 'center', marginBottom: 20 }}>
-            <Text maxFontSizeMultiplier={1.3} style={{ fontSize: 21, fontFamily: ff.bold, letterSpacing: -0.4, color: c('fg'), textAlign: 'center' }}>
+          <View style={{ marginBottom: 20 }}>
+            <Text maxFontSizeMultiplier={1.3} style={{ fontSize: 24, fontFamily: ff.bold, letterSpacing: -0.5, color: c('fg') }}>
               {step.title}
             </Text>
             {step.subtitle ? (
-              <Text maxFontSizeMultiplier={1.3} style={{ fontSize: 13, color: c('fgMuted'), marginTop: 6, textAlign: 'center', lineHeight: 18 }}>
+              <Text maxFontSizeMultiplier={1.3} style={{ fontSize: 13, color: c('fgMuted'), marginTop: 7, lineHeight: 19 }}>
                 {step.subtitle}
               </Text>
             ) : null}
@@ -394,7 +525,7 @@ export default function OnboardingScreen({ onComplete, topInset = 0, initialCurr
       {/* The compute step advances itself; a button would invite a tap racing
           the timer. */}
       {step.kind !== 'compute' ? (
-        <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
+        <View style={{ flexDirection: 'row', gap: 10, marginTop: 12, paddingHorizontal: 20 }}>
           {index > 0 ? (
             <View style={{ flex: 1 }}>
               <Button block size="lg" variant="outline" onPress={() => setIndex((i) => i - 1)}>Back</Button>
@@ -411,12 +542,9 @@ export default function OnboardingScreen({ onComplete, topInset = 0, initialCurr
           </View>
         </View>
       ) : null}
-
-      {index === 0 ? (
-        <Pressable onPress={skip} style={{ marginTop: 8, padding: 8, alignItems: 'center' }}>
-          <Text style={{ color: c('fgMuted'), fontSize: 12 }}>Skip setup, I’ll configure later</Text>
-        </Pressable>
-      ) : null}
+      {/* The first-screen-only skip link is gone: Skip is now a persistent
+          header control, where someone who wants out on screen fourteen will
+          actually look for it. */}
     </View>
   );
 }
@@ -428,6 +556,13 @@ function Row({ label, value, tone }) {
       <Text maxFontSizeMultiplier={1.3} style={[num(600), { fontSize: 13, color: tone || c('fg') }]}>{value}</Text>
     </View>
   );
+}
+
+/** The deadline a goal seeded here will actually be written with. */
+function goalDeadline(months) {
+  const d = new Date();
+  d.setMonth(d.getMonth() + months);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 /** Next occurrence of a day-of-month, as YYYY-MM-DD, clamped to month length. */

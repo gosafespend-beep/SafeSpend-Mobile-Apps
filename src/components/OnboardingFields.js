@@ -179,6 +179,72 @@ export function MultiField({ options, values, onToggle, reflection }) {
   );
 }
 
+/* -------------------------------------------------------------------- name */
+
+/**
+ * A short label, answered by tapping or typing.
+ *
+ * Naming a bill and naming a first expense were the last two screens still
+ * rendering a bordered text box, which next to a 31-cell calendar and a 40pt
+ * figure reads as the form the rest of the flow was written to avoid — and they
+ * land at the two moments that matter most, the first commitment and the last
+ * screen.
+ *
+ * The chips do most of the work, and they earn their place on a phone more than
+ * on web: almost every answer here is one of six words, and tapping one beats
+ * typing it on a touch keyboard every time.
+ */
+export function NameField({ value, onChange, placeholder, suggestions = [], autoFocus }) {
+  return (
+    <View style={{ alignItems: 'center' }}>
+      <TextInput
+        value={value}
+        onChangeText={onChange}
+        placeholder={placeholder}
+        placeholderTextColor={alpha(c('fgMuted'), 0.5)}
+        autoFocus={autoFocus}
+        maxFontSizeMultiplier={1.2}
+        accessibilityLabel={placeholder}
+        style={[num(600), {
+          fontSize: 26,
+          color: c('fg'),
+          textAlign: 'center',
+          alignSelf: 'stretch',
+          paddingVertical: 8,
+          borderBottomWidth: 2,
+          borderBottomColor: value ? alpha(c('primary'), 0.6) : c('border'),
+        }]}
+      />
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center', marginTop: 18 }}>
+        {suggestions.map((s) => {
+          const selected = value.toLowerCase() === s.toLowerCase();
+          return (
+            <Pressable
+              key={s}
+              // Tapping the chosen chip again clears it rather than being inert,
+              // and typing over one stops it looking chosen.
+              onPress={() => { haptics.tap(); onChange(selected ? '' : s); }}
+              accessibilityRole="button"
+              accessibilityState={{ selected }}
+              style={{
+                paddingHorizontal: 14, paddingVertical: 10, borderRadius: 999, borderWidth: 2,
+                borderColor: selected ? c('primary') : c('border'),
+                backgroundColor: selected ? alpha(c('primary'), 0.1) : 'transparent',
+              }}
+            >
+              <Text maxFontSizeMultiplier={1.2} style={{
+                fontSize: 13,
+                fontFamily: selected ? ff.semi : ff.reg,
+                color: selected ? c('fg') : c('fgMuted'),
+              }}>{s}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
 /* -------------------------------------------------------------------- fork */
 
 /**

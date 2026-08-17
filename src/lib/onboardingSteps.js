@@ -12,33 +12,57 @@
  * the product does not use is worse than no question.
  */
 
+/**
+ * The four acts of the flow.
+ *
+ * Twenty-one segments in a progress bar is confetti — nothing you can hold in
+ * your head. Naming four stretches says where you are, what this part is about
+ * and how much is left, and it means a fork that adds three screens shortens a
+ * segment instead of moving the goalposts.
+ */
+export const CHAPTERS = ['Your money', 'What comes in', 'What goes out', 'Your number'];
+
 export const STEP_DEFS = [
-  { id: 'intro', kind: 'statement', title: 'Let’s find your safe number', subtitle: 'A few quick questions. No bank login, ever.', fromWelcome: false },
-  { id: 'currency', kind: 'choice', title: 'Which currency do you think in?', fromWelcome: false },
-  { id: 'account-type', kind: 'choice', title: 'Where does your money sit?', subtitle: 'The account you actually spend from.' },
-  { id: 'balance', kind: 'amount', title: 'Roughly how much is in there?', subtitle: 'An estimate is fine. You can correct it later.' },
-  { id: 'income', kind: 'amount', title: 'What lands each month?', subtitle: 'Take-home, after tax.' },
-  { id: 'pay-frequency', kind: 'choice', title: 'How often does it arrive?' },
-  { id: 'payday', kind: 'day', title: 'Which day?', subtitle: 'So we know what’s landed and what’s still coming.' },
-  { id: 'has-bill', kind: 'fork', title: 'Got a big fixed bill?', subtitle: 'Rent, a loan, anything on the same day each month.' },
-  { id: 'bill-name', kind: 'text', title: 'What is it?', requires: 'has-bill' },
-  { id: 'bill-amount', kind: 'amount', title: 'How much?', requires: 'has-bill' },
-  { id: 'bill-day', kind: 'day', title: 'Due on which day?', requires: 'has-bill' },
-  { id: 'overspend', kind: 'multi', title: 'Where does it usually go?', subtitle: 'Pick the ones that catch you out.' },
-  { id: 'saving-for', kind: 'fork', title: 'Saving toward something?' },
-  { id: 'goal-detail', kind: 'amount', title: 'How much are you aiming for?', requires: 'saving-for' },
-  { id: 'has-debt', kind: 'fork', title: 'Anything you’re paying off?', subtitle: 'A card, a loan. It helps to see it beside everything else.' },
-  { id: 'debt-detail', kind: 'amount', title: 'Roughly how much is left?', requires: 'has-debt' },
-  { id: 'building', kind: 'compute', title: 'Working it out' },
-  { id: 'reveal', kind: 'reveal', title: 'Here’s what’s safe to spend' },
+  // "A few quick questions" was written for the nine-screen flow. Time is the
+  // honest unit: the forks change the count, and nobody counts questions.
+  { id: 'intro', chapter: 0, kind: 'statement', title: 'Let’s find your safe number', subtitle: 'About two minutes. No bank login, ever.', fromWelcome: false },
+  { id: 'currency', chapter: 0, kind: 'choice', title: 'Which currency do you think in?', subtitle: 'Every figure after this one is in it.', fromWelcome: false },
+  { id: 'account-type', chapter: 0, kind: 'choice', title: 'Where does your money sit?', subtitle: 'The account you actually spend from.' },
+  { id: 'balance', chapter: 0, kind: 'amount', title: 'Roughly how much is in there?', subtitle: 'An estimate is fine. You can correct it later.' },
+  { id: 'income', chapter: 1, kind: 'amount', title: 'What lands each month?', subtitle: 'Take-home, after tax.' },
+  { id: 'pay-frequency', chapter: 1, kind: 'choice', title: 'How often does it arrive?', subtitle: 'Weekly and fortnightly pay divide the month differently.' },
+  { id: 'payday', chapter: 1, kind: 'day', title: 'Which day?', subtitle: 'So we know what’s landed and what’s still coming.' },
+  { id: 'has-bill', chapter: 2, kind: 'fork', title: 'Got a big fixed bill?', subtitle: 'Rent, a loan, anything on the same day each month.' },
+  { id: 'bill-name', chapter: 2, kind: 'text', title: 'What is it?', subtitle: 'So it shows up by name when it’s due.', requires: 'has-bill' },
+  { id: 'bill-amount', chapter: 2, kind: 'amount', title: 'How much?', subtitle: 'The full amount that leaves each month.', requires: 'has-bill' },
+  { id: 'bill-day', chapter: 2, kind: 'day', title: 'Due on which day?', subtitle: 'We hold it back from your safe number until it’s paid.', requires: 'has-bill' },
+  { id: 'overspend', chapter: 2, kind: 'multi', title: 'Where does it usually go?', subtitle: 'Pick the ones that catch you out.' },
+  { id: 'saving-for', chapter: 2, kind: 'fork', title: 'Saving toward something?', subtitle: 'A trip, a deposit, a buffer — anything you’re putting money aside for.' },
+  // Was "How much are you aiming for?" with no mention of the timeframe, which
+  // the screen assumes rather than asks. Say the six months out loud.
+  { id: 'goal-detail', chapter: 2, kind: 'amount', title: 'How much do you need?', subtitle: 'We’ll set it aside over six months. You can change that later.', requires: 'saving-for' },
+  { id: 'has-debt', chapter: 2, kind: 'fork', title: 'Anything you’re paying off?', subtitle: 'A card, a loan. It helps to see it beside everything else.' },
+  { id: 'debt-detail', chapter: 2, kind: 'amount', title: 'Roughly how much is left?', subtitle: 'Rounding is fine. It sits in net worth, not in your safe number.', requires: 'has-debt' },
+  { id: 'building', chapter: 3, kind: 'compute', title: 'Working it out' },
+  { id: 'reveal', chapter: 3, kind: 'reveal', title: 'Here’s what’s safe to spend' },
   // Mobile only, and deliberately AFTER the reveal: asking for notification
   // permission before the user has anything to be notified about is the
   // weakest moment to ask. An in-app screen before the OS prompt measurably
   // lifts accept rates, because the system dialog gives no reason to say yes.
-  { id: 'alerts', kind: 'fork', title: 'Want a nudge before a bill lands?', subtitle: 'Only what’s useful — a bill due, a budget slipping.', platform: 'mobile' },
-  { id: 'first-amount', kind: 'amount', title: 'Log one thing you spent', subtitle: 'A coffee will do. This is the habit the whole app runs on.' },
-  { id: 'first-what', kind: 'text', title: 'What was it?' },
+  { id: 'alerts', chapter: 3, kind: 'fork', title: 'Want a nudge before a bill lands?', subtitle: 'Only what’s useful — a bill due, a budget slipping.', platform: 'mobile' },
+  { id: 'first-amount', chapter: 3, kind: 'amount', title: 'Log one thing you spent', subtitle: 'A coffee will do. This is the habit the whole app runs on.' },
+  { id: 'first-what', chapter: 3, kind: 'text', title: 'What was it?', subtitle: 'Last one. Then you’re in.' },
 ];
+
+/**
+ * Tappable answers for the two naming screens.
+ *
+ * Short lists on purpose. Ten chips is a menu to read; six is a row to glance
+ * at, and anything not there is one keystroke away in the field above. Matters
+ * more here than on web — typing on a phone is the slowest thing in the flow.
+ */
+export const BILL_SUGGESTIONS = ['Rent', 'Mortgage', 'Car loan', 'Childcare', 'Insurance', 'Phone'];
+export const FIRST_EXPENSE_SUGGESTIONS = ['Coffee', 'Lunch', 'Groceries', 'Transport', 'Snack'];
 
 /** The sequence for a given route in, with unanswered forks pruned. */
 export function stepsFor(fromWelcome, forks) {

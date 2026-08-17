@@ -143,8 +143,9 @@ describe('onboarding contract — feel', () => {
     /*
      * Not a preference. A delight pass adds glow and bounce everywhere without
      * noticing, and sparkling at someone while telling them they cannot cover
-     * rent loses them for good. The haptic on the Reveal is gated on
-     * hasInputs and is impact, never success.
+     * rent loses them for good. Two mechanisms now carry it: the haptic on the
+     * Reveal is impact and never success, and the mascot shown there is chosen
+     * from the RESULT rather than the screen.
      */
     expect(contract.NO_CELEBRATION_ON).toBe('danger');
     const revealHaptic = screen.slice(
@@ -153,5 +154,75 @@ describe('onboarding contract — feel', () => {
     );
     expect(revealHaptic).toContain('haptics.impact()');
     expect(revealHaptic).not.toContain('haptics.success()');
+
+    // scene-shield is the celebratory render — grinning, coins in orbit. A
+    // shortfall must get the steady one instead.
+    const variant = screen.split(/\r?\n/).find((l) => l.indexOf('const sceneVariant') === 0 || l.includes('sceneVariant ='));
+    expect(variant).toBeTruthy();
+    expect(variant).toContain("'danger'");
+    expect(variant).toContain("'steady'");
+  });
+});
+
+describe('onboarding — mascot', () => {
+  /*
+   * The artwork is PNG here and WebP on web, on purpose: React Native decodes
+   * WebP on Android but not on iOS without an extra image library, and there is
+   * no expo-image dependency in this project. A WebP set would have looked
+   * right in review and rendered nothing on every iPhone — so this test exists
+   * to stop someone "unifying" the formats later and shipping a blank flow.
+   */
+  const scene = src('components/OnboardingScene.js');
+  const assetDir = path.resolve(__dirname, '..', '..', '..', 'assets', 'mascot');
+
+  it('ships an image for every screen the flow can reach', () => {
+    const referenced = [...scene.matchAll(/mascot\/([a-z-]+)\.png/g)].map((m) => m[1]);
+    expect(referenced.length).toBeGreaterThan(10);
+    new Set(referenced).forEach((name) => {
+      expect(fs.existsSync(path.join(assetDir, `${name}.png`))).toBe(true);
+    });
+  });
+
+  it('covers every step id, so no screen silently loses its picture', () => {
+    const mapped = new Set([...scene.matchAll(/'?([a-z-]+)'?:\s*require/g)].map((m) => m[1]));
+    sequence.STEP_DEFS.forEach((s) => {
+      // 'reveal' resolves through the state map instead, by design.
+      if (s.id === 'reveal') return;
+      expect(mapped.has(s.id)).toBe(true);
+    });
+  });
+
+  it('uses PNG, not WebP', () => {
+    expect(scene).not.toMatch(/\.webp/);
+  });
+});
+
+describe('onboarding — chapters', () => {
+  it('gives every step a chapter, so the progress bar can segment', () => {
+    sequence.STEP_DEFS.forEach((s) => {
+      expect(typeof s.chapter).toBe('number');
+      expect(s.chapter).toBeLessThan(sequence.CHAPTERS.length);
+    });
+  });
+
+  it('runs the chapters in order and uses all of them', () => {
+    const seen = sequence.STEP_DEFS.map((s) => s.chapter);
+    expect(seen).toEqual([...seen].sort((a, b) => a - b));
+    expect(new Set(seen).size).toBe(sequence.CHAPTERS.length);
+  });
+
+  it('gives every question screen a subtitle', () => {
+    // Nine screens had none, which left the heading floating and lost the one
+    // line that makes a question feel considered rather than interrogative.
+    sequence.STEP_DEFS.forEach((s) => {
+      if (s.kind === 'compute' || s.kind === 'reveal') return;
+      expect(typeof s.subtitle).toBe('string');
+      expect(s.subtitle.length).toBeGreaterThan(0);
+    });
+  });
+
+  it('does not promise a screen count the forks can falsify', () => {
+    const intro = sequence.STEP_DEFS.find((s) => s.id === 'intro');
+    expect(intro.subtitle).not.toMatch(/\b(six|few|three|five)\b/i);
   });
 });
