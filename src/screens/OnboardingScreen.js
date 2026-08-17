@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { View, Text, Pressable, Image, ScrollView, Linking } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { c, hsl, ff, num, glow, alpha } from '../theme/tokens';
 import { Input, Button, Icon, Badge } from '../components';
@@ -80,6 +81,7 @@ function BreakdownRow({ label, value, tone, sign }) {
 const CURRENCIES = SUPPORTED_CURRENCIES;
 
 export default function OnboardingScreen({ onComplete, topInset = 0, initialCurrency, intent, fromWelcome = false }) {
+  const insets = useSafeAreaInsets();
   const { supported: lockSupported, setEnabled: setLockEnabled } = useAppLock();
   const { user } = useAuth();
   const { region } = useRegion();
@@ -277,7 +279,7 @@ export default function OnboardingScreen({ onComplete, topInset = 0, initialCurr
   const canContinue = name !== 'Account' || !!chosen;
 
   return (
-    <View style={{ flex: 1, backgroundColor: c('bg'), paddingTop: topInset + 30, paddingHorizontal: 20, paddingBottom: 24 }}>
+    <View style={{ flex: 1, backgroundColor: c('bg'), paddingTop: topInset + 30, paddingHorizontal: 20, paddingBottom: insets.bottom + 24 }}>
       {/* Progress */}
       <View style={{ marginBottom: 22 }}>
         <View style={{ height: 3, backgroundColor: c('surfaceSecondary'), borderRadius: 9999, overflow: 'hidden' }}>

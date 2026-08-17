@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, Pressable, Image, ScrollView, Linking, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { c, ff, glow, currentThemeMode } from '../theme/tokens';
@@ -56,6 +57,7 @@ function friendlyError(msg = '') {
 }
 
 export default function AuthScreen({ topInset = 0, initialMode = 'signin', onBackToWelcome }) {
+  const insets = useSafeAreaInsets();
   const { signIn, signUp, signInWithGoogle, signInWithApple, resetPassword } = useAuth();
   const [mode, setMode] = useState(initialMode === 'signup' ? 'signup' : 'signin');
   const [email, setEmail] = useState('');
@@ -131,7 +133,7 @@ export default function AuthScreen({ topInset = 0, initialMode = 'signin', onBac
   };
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: c('bg') }} contentContainerStyle={{ paddingTop: topInset + 50, paddingHorizontal: 24, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
+    <ScrollView style={{ flex: 1, backgroundColor: c('bg') }} contentContainerStyle={{ paddingTop: topInset + 50, paddingHorizontal: 24, paddingBottom: insets.bottom + 40 }} keyboardShouldPersistTaps="handled">
       {/* Logo + title */}
       <View style={{ alignItems: 'center', marginBottom: 28 }}>
         <View style={[{ width: 72, height: 72, borderRadius: 18, overflow: 'hidden', marginBottom: 16 }, glow(c('primary'), 0.45)]}>

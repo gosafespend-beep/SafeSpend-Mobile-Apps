@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, Pressable, Image, ScrollView } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { c, ff, num, glow, alpha, hsl } from '../theme/tokens';
@@ -40,6 +41,7 @@ const VALUE_PROPS = [
  * `onDone(mode)` advances the root gate to AuthScreen ('signup' | 'signin').
  */
 export default function WelcomeScreen({ onDone, topInset = 0 }) {
+  const insets = useSafeAreaInsets();
   const [step, setStep] = useState(0);
   const [intent, setIntent] = useState(null);
   const [currency, setCurrency] = useState(() => guessCurrency(SUPPORTED_CURRENCIES.map((x) => x.code)));
@@ -91,7 +93,7 @@ export default function WelcomeScreen({ onDone, topInset = 0 }) {
   const name = STEPS[step];
 
   return (
-    <View style={{ flex: 1, backgroundColor: c('bg'), paddingTop: topInset + 30, paddingHorizontal: 20, paddingBottom: 24 }}>
+    <View style={{ flex: 1, backgroundColor: c('bg'), paddingTop: topInset + 30, paddingHorizontal: 20, paddingBottom: insets.bottom + 24 }}>
       <LinearGradient colors={[alpha(c('primary'), 0.14), 'transparent']} start={{ x: 0.5, y: 0 }} end={{ x: 0.5, y: 0.5 }} style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '55%' }} />
 
       {/* Progress */}

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, Pressable, Modal, useWindowDimensions } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { c, ff, num, glow, alpha } from '../theme/tokens';
@@ -14,6 +15,7 @@ const SLIDES = [
 ];
 
 export default function ProductTour({ open, onClose }) {
+  const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const [i, setI] = useState(0);
   const slide = SLIDES[i];
@@ -50,7 +52,7 @@ export default function ProductTour({ open, onClose }) {
         </View>
 
         {/* Dots + action */}
-        <View style={{ paddingHorizontal: 28, paddingBottom: 44, gap: 22 }}>
+        <View style={{ paddingHorizontal: 28, paddingBottom: insets.bottom + 44, gap: 22 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 7 }}>
             {SLIDES.map((_, idx) => (
               <View key={idx} style={{ width: idx === i ? 22 : 7, height: 7, borderRadius: 9999, backgroundColor: idx === i ? c('primary') : c('surfaceSecondary') }} />

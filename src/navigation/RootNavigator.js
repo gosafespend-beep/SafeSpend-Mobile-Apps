@@ -96,7 +96,15 @@ function Shell({ title, showLogo = false, back = false, fabClearance = false, sc
       {scroll ? (
         <ScrollView
           style={{ flex: 1 }}
-          contentContainerStyle={{ flexGrow: 1, paddingBottom: fabClearance ? 96 : 24 }}
+          /*
+           * The bottom inset has to be added, not assumed. On a gesture-nav
+           * Android device the system bar occupies the bottom ~24-48dp of the
+           * screen and swallows taps aimed at anything under it; iOS reserves
+           * ~34pt for the home indicator. A fixed 24 puts the last button of a
+           * screen inside that strip, so the tap goes to the OS instead of the
+           * app -- which reads to the user as the button being broken.
+           */
+          contentContainerStyle={{ flexGrow: 1, paddingBottom: (fabClearance ? 96 : 24) + insets.bottom }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={c('primary')} colors={[c('primary')]} />}
