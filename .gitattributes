@@ -1,0 +1,22 @@
+# Line endings, settled.
+#
+# The repo had drifted to 55 CRLF files against 89 LF ones with nothing
+# arbitrating, so a tool that writes in the "wrong" dialect turns a thirteen-line
+# change into an 862-line diff. That happened, which is why this file exists.
+#
+# `text=auto` stores everything as LF in git and checks it out however the
+# platform wants. Nobody has to think about it again.
+* text=auto
+
+# Binary, so git never tries to "fix" the bytes.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.ttf binary
+*.otf binary
+*.jks binary
+*.keystore binary
+*.aab binary
+*.apk binary
+*.p8 binary
