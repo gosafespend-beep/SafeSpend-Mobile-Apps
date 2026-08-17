@@ -20,25 +20,25 @@
  * suites run.
  */
 
-export const CONTRACT_VERSION = 2;
+export const CONTRACT_VERSION = 3;
 
+/**
+ * Steps by id. Names became ids in v3, when the flow went from seven screens to
+ * twenty-one. Ids survive copy changes, which matters because analytics keys
+ * off them -- renaming a title should not orphan a funnel.
+ *
+ * The canonical sequence lives in lib/onboardingSteps.js.
+ */
 export const STEPS_FULL = [
-  'Welcome',
-  'Currency',
-  'Account',
-  'Money',
-  'Reveal',
-  'Alerts',
-  'First expense',
+  'intro', 'currency', 'account-type', 'balance', 'income', 'pay-frequency',
+  'payday', 'has-bill', 'bill-name', 'bill-amount', 'bill-day', 'overspend',
+  'saving-for', 'goal-detail', 'has-debt', 'debt-detail', 'building', 'reveal',
+  'alerts', 'first-amount', 'first-what',
 ];
 
-export const STEPS_FROM_WELCOME = [
-  'Account',
-  'Money',
-  'Reveal',
-  'Alerts',
-  'First expense',
-];
+export const STEPS_FROM_WELCOME = STEPS_FULL.filter(
+  (s) => s !== 'intro' && s !== 'currency',
+);
 
 /*
  * Two permitted divergences from web, listed so they stay decisions rather

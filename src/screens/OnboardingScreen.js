@@ -1,626 +1,445 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { View, Text, Pressable, Image, ScrollView, Linking, Animated } from 'react-native';
+import { View, Text, Pressable, ScrollView, Linking, Animated } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { c, hsl, ff, num, glow, alpha } from '../theme/tokens';
+import { c, ff, num, alpha } from '../theme/tokens';
 import { Input, Button, Icon, Badge } from '../components';
 import { AnimatedNumber, useAnimatedProgress, Reveal as Rise } from '../components/motion';
-import { useCelebration } from '../contexts/CelebrationContext';
-import { haptics } from '../lib/haptics';
+import { AmountField, DayField, ChoiceField, MultiField, ForkField } from '../components/OnboardingFields';
 import { SUPPORTED_CURRENCIES, money, currencySymbol } from '../lib/format';
-import { useAppLock, BIOMETRIC_LABEL } from '../contexts/AppLockContext';
+import { useAppLock } from '../contexts/AppLockContext';
+import { useCelebration } from '../contexts/CelebrationContext';
 import { useAuth } from '../contexts/AuthContext';
-import { useRegion } from '../contexts/RegionContext';
 import { requestNotifPermission, scheduleActivationNudge } from '../lib/notifications';
 import { computeAvailableToSpend } from '../lib/available';
+import { haptics } from '../lib/haptics';
 import { track } from '../lib/analytics';
+import {
+  stepsFor, ACCOUNT_OPTIONS, FREQUENCY_OPTIONS, OVERSPEND_CATEGORIES,
+  reflect, reflectDay, BUILDING_LINES,
+} from '../lib/onboardingSteps';
 
-// Progress is namespaced per user: a shared/demo device must never restore one
-// person's half-finished setup (account choices + typed balances) into another
-// person's brand-new account.
-const progressKey = (uid) => `onboarding_progress:${uid || 'anon'}`;
-const LEGACY_PROGRESS_KEY = 'onboarding_progress';
+/**
+ * Onboarding, rendered from the sequence in lib/onboardingSteps.js.
+ *
+ * Replaces a seven-step screen whose steps were a conditional chain and whose
+ * Money step asked five things at once. Twenty screens, one question each.
+ * Finance is the longest onboarding category in the industry and seven of the
+ * ten longest apps are finance apps, so this is the norm for the category
+ * rather than an indulgence.
+ *
+ * The web app renders the same ids in the same order. `alerts` is the one
+ * mobile-only screen and it sits after the reveal, because asking for
+ * notification permission before the user has anything to be notified about is
+ * the weakest moment to ask.
+ */
 
-const logo = require('../../assets/logo-shield.png');
-
-// Steps when the user came through the pre-auth welcome (intro + currency already
-// answered there). `Reveal` replaces the old static "Ready" slide: instead of
-// telling the user they're set up, it shows the number the app just worked out.
-// 'First expense' is last on purpose. The flow used to end on Alerts and hand
-// over a dashboard — and 34 of 37 accounts have never recorded a transaction.
-// Nobody should arrive having entered nothing. Mirrors the web flow; see
-// src/lib/onboardingContract.js.
-const STEPS_FROM_WELCOME = ['Account', 'Money', 'Reveal', 'Alerts', 'First expense'];
-const STEPS_FULL = ['Welcome', 'Currency', 'Account', 'Money', 'Reveal', 'Alerts', 'First expense'];
-
-// A one-line nod to the goal the user picked in the pre-auth welcome.
-const INTENT_LINE = {
-  overspend: 'Let’s keep your spending safe.',
-  save: 'Let’s reach that goal.',
-  debt: 'Let’s knock down that debt.',
-  track: 'Let’s see where it all goes.',
-};
-
-// The first account has to be somewhere the user actually spends from, because
-// Safe-to-Spend is computed from LIQUID balances only. Savings and cards are
-// deliberately not offered here — they'd read as 0 spendable (savings) or invert
-// the number (a card is debt); both are one tap away from Accounts afterwards.
-const PRIMARY_PRESETS = [
-  { id: 'bank', name: 'Bank account', type: 'bank', icon: 'wallet', color: '200 70% 50%' },
-  { id: 'momo', name: 'Mobile money', type: 'cash', icon: 'smartphone', color: '158 64% 45%', mobileMoneyOnly: true },
-  { id: 'cash', name: 'Cash', type: 'cash', icon: 'banknote', color: '45 93% 47%' },
-];
-
-/** One-way opt-in row: an icon, copy, and a control that flips to a check once enabled. */
-function OfferRow({ icon, tone, title, body, done, onEnable, actionLabel = 'Enable' }) {
-  return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: done ? c('income', 0.35) : c('border'), backgroundColor: c('surface') }}>
-      <View style={{ width: 40, height: 40, borderRadius: 11, backgroundColor: alpha(tone, 0.14), alignItems: 'center', justifyContent: 'center' }}>
-        <Icon name={icon} size={18} color={tone} />
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={{ fontSize: 14, fontFamily: ff.semi, color: c('fg') }}>{title}</Text>
-        <Text style={{ fontSize: 11, color: c('fgMuted'), marginTop: 2, lineHeight: 15 }}>{body}</Text>
-      </View>
-      {done ? (
-        <View style={{ width: 30, height: 30, borderRadius: 9999, backgroundColor: c('income'), alignItems: 'center', justifyContent: 'center' }}>
-          <Icon name="check" size={15} color="#fff" stroke={2.5} />
-        </View>
-      ) : (
-        <Pressable onPress={onEnable} accessibilityRole="button" style={({ pressed }) => [{ paddingVertical: 8, paddingHorizontal: 14, borderRadius: 9, backgroundColor: c('primary') }, pressed && { opacity: 0.85 }]}>
-          <Text style={{ fontSize: 13, fontFamily: ff.semi, color: '#fff' }}>{actionLabel}</Text>
-        </Pressable>
-      )}
-    </View>
-  );
-}
-
-/** A labelled row in the reveal's breakdown. */
-function BreakdownRow({ label, value, tone, sign }) {
-  return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 7 }}>
-      <Text style={{ fontSize: 12.5, color: c('fgMuted') }}>{label}</Text>
-      <Text style={[num(600), { fontSize: 13, color: tone || c('fg') }]}>{`${sign || ''}${value}`}</Text>
-    </View>
-  );
-}
-
-const CURRENCIES = SUPPORTED_CURRENCIES;
+const DEFAULT_GOAL_MONTHS = 6;
 
 export default function OnboardingScreen({ onComplete, topInset = 0, initialCurrency, intents = [], fromWelcome = false }) {
   const insets = useSafeAreaInsets();
   const { celebrate } = useCelebration();
   const { supported: lockSupported, setEnabled: setLockEnabled } = useAppLock();
   const { user } = useAuth();
-  const { region } = useRegion();
-  const STEPS = fromWelcome ? STEPS_FROM_WELCOME : STEPS_FULL;
-  const [step, setStep] = useState(0);
-  const [firstAmount, setFirstAmount] = useState('');
-  const [firstDescription, setFirstDescription] = useState('');
+
+  const [index, setIndex] = useState(0);
   const [currency, setCurrency] = useState(initialCurrency || 'USD');
-  const [search, setSearch] = useState('');
-  // Primary account
-  const [preset, setPreset] = useState('bank');
+  const [accountType, setAccountType] = useState(null);
   const [balance, setBalance] = useState('');
-  // Monthly money
   const [income, setIncome] = useState('');
-  const [payday, setPayday] = useState('');
+  const [frequency, setFrequency] = useState('monthly');
+  const [payday, setPayday] = useState(null);
+  const [hasBill, setHasBill] = useState(null);
   const [billName, setBillName] = useState('');
   const [billAmount, setBillAmount] = useState('');
-  const [billDay, setBillDay] = useState('');
-  // The bill is optional and starts collapsed so the Money step reads as two quick
-  // fields, not a five-field wall right before the payoff. It auto-expands when a
-  // resumed session already has bill data (see `showBill` below).
-  const [billExpanded, setBillExpanded] = useState(false);
-  const [notifsOn, setNotifsOn] = useState(false);
-  const [notifBlocked, setNotifBlocked] = useState(false);
-  const [lockOn, setLockOn] = useState(false);
-  const [restored, setRestored] = useState(false);
-  const finished = useRef(false);
+  const [billDay, setBillDay] = useState(null);
+  const [overspend, setOverspend] = useState([]);
+  const [savingFor, setSavingFor] = useState(null);
+  const [goalTarget, setGoalTarget] = useState('');
+  const [hasDebt, setHasDebt] = useState(null);
+  const [debtAmount, setDebtAmount] = useState('');
+  const [notifsOn, setNotifsOn] = useState(null);
+  const [firstAmount, setFirstAmount] = useState('');
+  const [firstWhat, setFirstWhat] = useState('');
+  const [buildLine, setBuildLine] = useState(0);
 
-  // Mobile money leads in markets where it's how people actually hold money.
-  const presets = useMemo(() => {
-    const tags = region?.tags || [];
-    const isMomo = tags.includes('m-pesa') || tags.includes('mobile-money');
-    const list = PRIMARY_PRESETS.filter((p) => !p.mobileMoneyOnly || isMomo);
-    return isMomo ? [...list].sort((a, b) => (a.id === 'momo' ? -1 : b.id === 'momo' ? 1 : 0)) : list;
-  }, [region]);
-
-  // Restore an interrupted run so killing the app mid-setup doesn't reset it.
-  useEffect(() => {
-    let active = true;
-    const key = progressKey(user?.id);
-    AsyncStorage.getItem(key).then((raw) => {
-      if (!active) { return; }
-      // One-time cleanup: the old key wasn't user-scoped, so it can't be trusted.
-      AsyncStorage.removeItem(LEGACY_PROGRESS_KEY).catch(() => {});
-      if (!raw) { setRestored(true); return; }
-      try {
-        const p = JSON.parse(raw);
-        if (typeof p.step === 'number') setStep(Math.min(Math.max(0, p.step), STEPS.length - 1));
-        if (p.currency && !initialCurrency) setCurrency(p.currency);
-        if (p.preset) setPreset(p.preset);
-        if (p.balance != null) setBalance(String(p.balance));
-        if (p.income != null) setIncome(String(p.income));
-        if (p.payday != null) setPayday(String(p.payday));
-        if (p.billName != null) setBillName(String(p.billName));
-        if (p.billAmount != null) setBillAmount(String(p.billAmount));
-        if (p.billDay != null) setBillDay(String(p.billDay));
-      } catch { /* ignore corrupt state */ }
-      setRestored(true);
-    }).catch(() => setRestored(true));
-    return () => { active = false; };
-  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Persist progress as the user moves through the flow.
-  useEffect(() => {
-    if (!restored) return;
-    AsyncStorage.setItem(progressKey(user?.id), JSON.stringify({
-      step, currency, preset, balance, income, payday, billName, billAmount, billDay,
-    })).catch(() => {});
-  }, [restored, step, currency, preset, balance, income, payday, billName, billAmount, billDay, user?.id]);
-
-  const name = STEPS[step];
-
-  // Funnel telemetry fires when a step is ENTERED (including the first one), so
-  // per-step drop-off is measurable. Firing on exit — as this used to — made
-  // "viewed and abandoned" indistinguishable from "never reached".
-  useEffect(() => {
-    if (!restored) return;
-    track('onboarding_step', { step: name, index: step });
-    /*
-     * A light tap when the figure arrives. The app already uses haptics for
-     * confirmations elsewhere; the one moment that most deserves it had none.
-     * Deliberately NOT success() -- that is reserved for something the user
-     * achieved, and a shortfall must not feel like a win.
-     */
-    if (name === 'Reveal' && reveal.hasInputs) haptics.impact();
-  }, [name, restored]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // A user who walks away mid-setup is the drop-off we most need to see. The
-  // current step is read from a ref so this effect can have empty deps — with
-  // [step] deps React would run the cleanup on every step change and report an
-  // abandon for each one.
-  const stepRef = useRef(step);
-  stepRef.current = step;
-  useEffect(() => () => {
-    if (!finished.current) {
-      const i = stepRef.current;
-      track('onboarding_abandon', { step: STEPS[i], index: i });
-    }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const enableNotifs = async () => {
-    const { granted, blocked } = await requestNotifPermission();
-    setNotifsOn(granted);
-    setNotifBlocked(!granted && blocked);
-    track('notif_permission', { granted, blocked, where: 'onboarding' });
-  };
-  const openSettings = () => { Linking.openSettings().catch(() => {}); };
-  const enableLock = async () => {
-    const ok = await setLockEnabled(true);
-    setLockOn(!!ok);
-  };
-
-  const progress = ((step + 1) / STEPS.length) * 100;
-  // Fills rather than jumping. useAnimatedProgress already honours
-  // prefers-reduced-motion internally, so no guard is needed here.
-  const progressAnim = useAnimatedProgress(progress);
+  const numOr0 = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : 0; };
   const symbol = currencySymbol(currency);
-  const filtered = CURRENCIES.filter(
-    (x) => !search || x.name.toLowerCase().includes(search.toLowerCase()) || x.code.toLowerCase().includes(search.toLowerCase()) || x.country.toLowerCase().includes(search.toLowerCase())
-  );
-
-  const numOr0 = (v) => parseFloat(String(v).replace(/[^0-9.]/g, '')) || 0;
-  const dayOr = (v, fallback) => {
-    const n = parseInt(String(v).replace(/[^0-9]/g, ''), 10);
-    return Number.isFinite(n) && n >= 1 && n <= 31 ? n : fallback;
-  };
-  const chosen = presets.find((p) => p.id === preset) || presets[0];
-  // Show the bill fields once the user opts in, or immediately if a restored run
-  // already captured a bill — so resuming never hides data they'd entered.
-  const showBill = billExpanded || !!(billName || billAmount || billDay);
-
-  // The next occurrence of a day-of-month, clamped to short months. Used as the
-  // recurring income's `next_due` so Safe-to-Spend credits it only when it's
-  // genuinely still ahead of the user this month.
-  const nextDueFor = (day) => {
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = now.getMonth();
-    const target = Math.min(day, new Date(y, m + 1, 0).getDate());
-    const thisMonth = new Date(y, m, target);
-    if (thisMonth > new Date(y, m, now.getDate())) {
-      return `${y}-${String(m + 1).padStart(2, '0')}-${String(target).padStart(2, '0')}`;
-    }
-    const nm = new Date(y, m + 1, 1);
-    const t2 = Math.min(day, new Date(nm.getFullYear(), nm.getMonth() + 1, 0).getDate());
-    return `${nm.getFullYear()}-${String(nm.getMonth() + 1).padStart(2, '0')}-${String(t2).padStart(2, '0')}`;
-  };
-
-  // What the user gets to see before they're ever asked for anything: a real
-  // Safe-to-Spend, computed by the same function the dashboard uses, from what
-  // they just typed. No network needed — nothing is written until `finish()`.
-  const reveal = useMemo(() => {
-    const liquid = numOr0(balance);
-    const inc = numOr0(income);
-    const billAmt = numOr0(billAmount);
-    const recurring = inc > 0
-      ? [{ type: 'income', amount: inc, is_active: true, next_due: nextDueFor(dayOr(payday, 1)), description: 'Income' }]
-      : [];
-    const bills = billAmt > 0
-      ? [{ id: 'onb-bill', name: billName.trim() || 'Fixed bill', amount: billAmt, due_day: dayOr(billDay, 1), is_active: true }]
-      : [];
-    const res = computeAvailableToSpend({ liquidBalance: liquid, bills, billStatuses: [], goals: [], recurring, avgDailySpend: 0 });
-    return { ...res, hasInputs: liquid > 0 || inc > 0 || billAmt > 0 };
-  }, [balance, income, payday, billName, billAmount, billDay]);
-
   const m = (n) => money(n, { currency, cents: false });
+
+  const forks = useMemo(
+    () => ({ 'has-bill': hasBill === true, 'saving-for': savingFor === true, 'has-debt': hasDebt === true }),
+    [hasBill, savingFor, hasDebt],
+  );
+  const steps = useMemo(() => stepsFor(fromWelcome, forks), [fromWelcome, forks]);
+  const step = steps[Math.min(index, steps.length - 1)];
+  const isLast = index >= steps.length - 1;
+
+  const progress = ((index + 1) / steps.length) * 100;
+  const progressAnim = useAnimatedProgress(progress);
+
+  /**
+   * Everything entered so far, as the figure it produces.
+   *
+   * Savings and credit contribute nothing to the opening balance, matching the
+   * liquid-balance rule everywhere else: money set aside is not money that is
+   * safe to spend, and the reveal must not disagree with the dashboard the user
+   * lands on thirty seconds later.
+   */
+  const reveal = useMemo(() => {
+    const liquid = accountType === 'savings' || accountType === 'credit' ? 0 : numOr0(balance);
+    const inc = numOr0(income);
+    const bill = numOr0(billAmount);
+    const res = computeAvailableToSpend({
+      liquidBalance: liquid,
+      bills: bill > 0 ? [{ id: 'onb', name: billName.trim() || 'Fixed bill', amount: bill, due_day: billDay || 1, is_active: true }] : [],
+      billStatuses: [],
+      goals: numOr0(goalTarget) > 0 ? [{ target_amount: numOr0(goalTarget), current_amount: 0, deadline: null }] : [],
+      recurring: inc > 0 ? [{ type: 'income', amount: inc, is_active: true, next_due: nextDue(payday || 1), description: 'Income' }] : [],
+      avgDailySpend: 0,
+    });
+    return { ...res, hasInputs: liquid > 0 || inc > 0 || bill > 0 };
+  }, [accountType, balance, income, payday, billName, billAmount, billDay, goalTarget]);
+
+  /* ---------------------------------------------------------- telemetry -- */
+
+  useEffect(() => {
+    if (!step) return;
+    track('onboarding_step', { step: step.id, index });
+    // A light tap when the figure arrives. Deliberately impact(), not success():
+    // success is for something achieved, and a shortfall must not feel like one.
+    if (step.id === 'reveal' && reveal.hasInputs) haptics.impact();
+  }, [step && step.id, index]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const finished = useRef(false);
+  const stepRef = useRef(step && step.id);
+  stepRef.current = step && step.id;
+  useEffect(() => () => {
+    // Read from a ref with empty deps, or one walk-away is reported twenty times.
+    if (!finished.current) track('onboarding_abandon', { step: stepRef.current, index: 0 });
+  }, []);
+
+  /* ------------------------------------------------------------ compute -- */
+
+  useEffect(() => {
+    if (!step || step.kind !== 'compute') return;
+    setBuildLine(0);
+    const timers = BUILDING_LINES.map((_, i) => setTimeout(() => setBuildLine(i), i * 550));
+    const done = setTimeout(() => setIndex((i) => i + 1), BUILDING_LINES.length * 550 + 300);
+    return () => { timers.forEach(clearTimeout); clearTimeout(done); };
+  }, [step && step.kind]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* ---------------------------------------------------------------- nav -- */
+
+  const canContinue = (() => {
+    if (!step) return false;
+    switch (step.id) {
+      case 'currency': return Boolean(currency);
+      case 'account-type': return Boolean(accountType);
+      case 'income': return numOr0(income) > 0;
+      case 'pay-frequency': return Boolean(frequency);
+      case 'payday': return payday !== null;
+      case 'has-bill': return hasBill !== null;
+      case 'bill-amount': return numOr0(billAmount) > 0;
+      case 'bill-day': return billDay !== null;
+      case 'saving-for': return savingFor !== null;
+      case 'has-debt': return hasDebt !== null;
+      case 'alerts': return notifsOn !== null;
+      // Balance, names and the first expense stay skippable: blocking on them
+      // trades a completed setup for a perfect one.
+      default: return true;
+    }
+  })();
 
   const finish = () => {
     finished.current = true;
-    const bal = numOr0(balance);
-    const accounts = [{
-      name: chosen.name,
-      type: chosen.type,
-      color: chosen.color,
-      initial_balance: bal,
-    }];
+    const type = accountType || 'bank';
+    const preset = ACCOUNT_OPTIONS.find((o) => o.id === type);
     const inc = numOr0(income);
-    const recurringIncome = inc > 0
-      ? { type: 'income', amount: inc, description: 'Income', category: 'Income', frequency: 'monthly', next_due: nextDueFor(dayOr(payday, 1)) }
-      : null;
-    const billAmt = numOr0(billAmount);
-    const bill = billAmt > 0
-      ? { name: billName.trim() || 'Fixed bill', amount: billAmt, due_day: dayOr(billDay, 1) }
-      : null;
-    const firstAmt = numOr0(firstAmount);
-    const firstExpense = firstAmt > 0
-      ? { amount: firstAmt, description: firstDescription.trim() || 'First expense' }
-      : null;
-    if (firstExpense) {
-      track('first_transaction', { where: 'onboarding', amount: firstAmt });
-      /*
-       * The habit the whole product depends on, and onboarding was the one
-       * path that reached it without saying anything. RootNavigator already
-       * celebrates a first transaction logged through the FAB; this is the
-       * same moment arriving by a different door.
-       */
+    const bill = numOr0(billAmount);
+    const first = numOr0(firstAmount);
+
+    if (first > 0) {
+      track('first_transaction', { where: 'onboarding', amount: first });
       haptics.success();
       celebrate('First transaction logged! 🎉');
     }
 
     track('onboarding_complete', {
-      currency, intent: intent || null, notifsOn, lockOn,
-      accountType: chosen.type, hasBalance: bal > 0, hasIncome: !!recurringIncome, hasBill: !!bill,
-      safeToSpend: reveal.availableToSpend,
+      currency, intents: intents.join(','), accountType: type,
+      hasBalance: numOr0(balance) > 0, hasIncome: inc > 0, hasBill: bill > 0,
+      categories: overspend.length, hasGoal: numOr0(goalTarget) > 0,
+      hasDebt: numOr0(debtAmount) > 0, firstExpense: first > 0,
+      notifsOn: notifsOn === true, safeToSpend: reveal.availableToSpend,
+      screens: steps.length,
     });
-    AsyncStorage.removeItem(progressKey(user?.id)).catch(() => {});
-    // Handed to the paywall so its copy can reference a number the user has
-    // already seen, instead of opening cold.
-    AsyncStorage.setItem('pref_onboarding_s2s', JSON.stringify({
-      amount: reveal.availableToSpend, currency, daily: reveal.dailySafe,
-    })).catch(() => {});
-    scheduleActivationNudge(); // best-effort "come back and finish" reminder
-    onComplete && onComplete({ currency, accounts, recurringIncome, bill });
+
+    if (notifsOn !== true) scheduleActivationNudge();
+
+    onComplete({
+      currency,
+      accounts: [{
+        name: (preset && preset.label.replace(/^A /, '')) || 'Account',
+        type,
+        color: preset ? `hsl(${preset.tone})` : c('primary'),
+        initial_balance: numOr0(balance),
+      }],
+      recurringIncome: inc > 0
+        ? { type: 'income', amount: inc, description: 'Income', category: 'Income', frequency, next_due: nextDue(payday || 1) }
+        : null,
+      bill: bill > 0 ? { name: billName.trim() || 'Fixed bill', amount: bill, due_day: billDay || 1 } : null,
+      categories: overspend,
+      goal: numOr0(goalTarget) > 0 ? { name: 'Savings goal', target: numOr0(goalTarget), months: DEFAULT_GOAL_MONTHS } : null,
+      debt: numOr0(debtAmount) > 0 ? { name: 'Debt', amount: numOr0(debtAmount) } : null,
+      firstExpense: first > 0 ? { amount: first, description: firstWhat.trim() || 'First expense' } : null,
+    });
   };
 
-  const skip = () => { finished.current = true; track('onboarding_skip', { step: name }); finish(); };
+  const next = () => { if (isLast) finish(); else setIndex((i) => i + 1); };
 
-  const next = () => {
-    if (step < STEPS.length - 1) setStep(step + 1);
-    else finish();
+  const skip = () => {
+    finished.current = true;
+    track('onboarding_skip', { step: step && step.id });
+    onComplete({ currency, accounts: [], recurringIncome: null, bill: null, categories: [], goal: null, debt: null, firstExpense: null });
   };
 
-  const canContinue = name !== 'Account' || !!chosen;
+  const enableNotifs = async () => {
+    const { granted, blocked } = await requestNotifPermission();
+    setNotifsOn(granted);
+    track('notif_permission', { granted, blocked, where: 'onboarding' });
+    if (!granted && blocked) Linking.openSettings().catch(() => {});
+    if (lockSupported && granted) setLockEnabled(true);
+  };
+
+  /* --------------------------------------------------------------- body -- */
+
+  const body = () => {
+    if (!step) return null;
+    switch (step.id) {
+      case 'intro':
+        return (
+          <Text maxFontSizeMultiplier={1.3} style={{ fontSize: 13, color: c('fgMuted'), textAlign: 'center', lineHeight: 19 }}>
+            Nothing you enter leaves your account, and we never ask for a bank login.
+          </Text>
+        );
+
+      case 'currency':
+        return (
+          <ChoiceField
+            value={currency}
+            onChange={setCurrency}
+            options={SUPPORTED_CURRENCIES.slice(0, 6).map((cur) => ({
+              id: cur.code, label: `${cur.symbol}  ${cur.code}`, hint: cur.country || cur.name,
+            }))}
+          />
+        );
+
+      case 'account-type':
+        return <ChoiceField options={ACCOUNT_OPTIONS} value={accountType} onChange={setAccountType} />;
+
+      case 'balance':
+        return <AmountField autoFocus value={balance} onChange={setBalance} symbol={symbol}
+          reflection={reflect('balance', { value: numOr0(balance), money: m })} />;
+
+      case 'income':
+        return <AmountField autoFocus value={income} onChange={setIncome} symbol={symbol}
+          reflection={reflect('income', { value: numOr0(income), money: m })} />;
+
+      case 'pay-frequency':
+        return <ChoiceField options={FREQUENCY_OPTIONS} value={frequency} onChange={setFrequency} />;
+
+      case 'payday':
+        return <DayField value={payday} onChange={setPayday} reflection={reflectDay(payday)} />;
+
+      case 'has-bill':
+        return <ForkField value={hasBill} onChange={setHasBill} yesLabel="Yes, I do" noLabel="Not really" />;
+
+      case 'bill-name':
+        return <Input autoFocus placeholder="Rent, car loan, childcare…" value={billName} onChange={setBillName} />;
+
+      case 'bill-amount':
+        return <AmountField autoFocus value={billAmount} onChange={setBillAmount} symbol={symbol}
+          reflection={reflect('bill-amount', { value: numOr0(billAmount), income: numOr0(income), money: m })} />;
+
+      case 'bill-day':
+        return <DayField value={billDay} onChange={setBillDay} reflection={reflectDay(billDay)} />;
+
+      case 'overspend':
+        return (
+          <MultiField
+            options={OVERSPEND_CATEGORIES}
+            values={overspend}
+            onToggle={(id) => setOverspend((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])}
+            reflection={reflect('overspend', { count: overspend.length, money: m })}
+          />
+        );
+
+      case 'saving-for':
+        return <ForkField value={savingFor} onChange={setSavingFor} yesLabel="Yes" noLabel="Not yet" />;
+
+      case 'goal-detail':
+        return <AmountField autoFocus value={goalTarget} onChange={setGoalTarget} symbol={symbol}
+          reflection={reflect('goal-detail', { value: numOr0(goalTarget), money: m })} />;
+
+      case 'has-debt':
+        return <ForkField value={hasDebt} onChange={setHasDebt} yesLabel="Yes" noLabel="Nothing right now" />;
+
+      case 'debt-detail':
+        return <AmountField autoFocus value={debtAmount} onChange={setDebtAmount} symbol={symbol}
+          reflection={reflect('debt-detail', { value: numOr0(debtAmount), money: m })} />;
+
+      case 'building':
+        return (
+          <Text accessibilityLiveRegion="polite" maxFontSizeMultiplier={1.3}
+            style={{ fontSize: 14, color: c('fgMuted'), textAlign: 'center' }}>
+            {BUILDING_LINES[buildLine]}
+          </Text>
+        );
+
+      case 'reveal':
+        return reveal.hasInputs ? (
+          <View style={{ alignItems: 'center', gap: 10 }}>
+            {/* Counts up rather than appearing. A number that lands instantly
+                reads as a receipt. */}
+            <AnimatedNumber
+              value={reveal.availableToSpend}
+              format={m}
+              numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}
+              maxFontSizeMultiplier={1.3}
+              style={[num(700), { fontSize: 40, letterSpacing: -0.6, color: c('primary') }]}
+            />
+            <Badge variant={reveal.status === 'danger' ? 'expense' : reveal.status === 'caution' ? 'warning' : 'income'}>
+              {reveal.status === 'danger' ? 'Shortfall' : reveal.status === 'caution' ? 'Caution' : 'Healthy'}
+            </Badge>
+            <Text maxFontSizeMultiplier={1.3} style={{ fontSize: 13, color: c('fgMuted'), textAlign: 'center' }}>
+              {reveal.statusMessage}
+            </Text>
+            <View style={{ alignSelf: 'stretch', gap: 8, backgroundColor: c('surfaceSecondary'), borderRadius: 13, padding: 15, marginTop: 4 }}>
+              <Row label="Starting balance" value={m(reveal.liquidBalance)} />
+              {reveal.expectedIncomeThisMonth > 0 ? <Row label="Income still due" value={`+${m(reveal.expectedIncomeThisMonth)}`} tone={c('income')} /> : null}
+              {reveal.unpaidBillsThisMonth > 0 ? <Row label="Bills to pay" value={`−${m(reveal.unpaidBillsThisMonth)}`} tone={c('expense')} /> : null}
+              {reveal.goalContributions > 0 ? <Row label="Set aside for your goal" value={`−${m(reveal.goalContributions)}`} /> : null}
+              <Row label="That’s about" value={`${m(reveal.dailySafe)}/day · ${reveal.daysRemaining}d`} />
+            </View>
+          </View>
+        ) : (
+          <View style={{ alignItems: 'center', gap: 10 }}>
+            <Icon name="sparkles" size={28} color={c('income')} />
+            <Text maxFontSizeMultiplier={1.3} style={{ fontSize: 14, color: c('fgMuted'), textAlign: 'center', lineHeight: 20 }}>
+              Add your income whenever you’re ready and we’ll work out what’s safe to spend.
+            </Text>
+          </View>
+        );
+
+      case 'alerts':
+        return (
+          <View style={{ gap: 12 }}>
+            <ForkField
+              value={notifsOn}
+              onChange={(v) => { setNotifsOn(v); if (v) enableNotifs(); }}
+              yesLabel="Yes, remind me"
+              noLabel="No thanks"
+            />
+            {/* Teasing the actual notification is what turns a permission
+                request into an offer. */}
+            <View style={{ backgroundColor: c('surfaceSecondary'), borderRadius: 12, padding: 13, flexDirection: 'row', gap: 10, alignItems: 'center' }}>
+              <Icon name="bell" size={16} color={c('fgMuted')} />
+              <Text maxFontSizeMultiplier={1.3} style={{ flex: 1, fontSize: 12, color: c('fgMuted'), lineHeight: 17 }}>
+                “Rent is due in 3 days — you’ve got enough set aside.”
+              </Text>
+            </View>
+          </View>
+        );
+
+      case 'first-amount':
+        return <AmountField autoFocus value={firstAmount} onChange={setFirstAmount} symbol={symbol} />;
+
+      case 'first-what':
+        return <Input autoFocus placeholder="Coffee, bus fare, lunch…" value={firstWhat} onChange={setFirstWhat} />;
+
+      default:
+        return null;
+    }
+  };
+
+  if (!step) return null;
 
   return (
     <View style={{ flex: 1, backgroundColor: c('bg'), paddingTop: topInset + 30, paddingHorizontal: 20, paddingBottom: insets.bottom + 24 }}>
-      {/* Progress */}
       <View style={{ marginBottom: 22 }}>
         <View style={{ height: 3, backgroundColor: c('surfaceSecondary'), borderRadius: 9999, overflow: 'hidden' }}>
-          <Animated.View
-            style={{
-              width: progressAnim.interpolate({ inputRange: [0, 100], outputRange: ['0%', '100%'] }),
-              height: '100%',
-              backgroundColor: c('primary'),
-            }}
-          />
-        </View>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
-          {STEPS.map((s, i) => (
-            <Text key={s} style={{ fontSize: 10, fontFamily: ff.semi, letterSpacing: 0.4, textTransform: 'uppercase', color: i <= step ? c('primary') : c('fgMuted') }}>{s}</Text>
-          ))}
+          <Animated.View style={{
+            width: progressAnim.interpolate({ inputRange: [0, 100], outputRange: ['0%', '100%'] }),
+            height: '100%',
+            backgroundColor: c('primary'),
+          }} />
         </View>
       </View>
 
-      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-        {/* Welcome (only when the pre-auth welcome was skipped) */}
-        {name === 'Welcome' ? (
-          <View style={{ alignItems: 'center' }}>
-            <View style={[{ width: 80, height: 80, marginBottom: 18, borderRadius: 20, overflow: 'hidden' }, glow(c('primary'), 0.5)]}>
-              <Image source={logo} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
-            </View>
-            <Text style={{ fontSize: 24, fontFamily: ff.bold, letterSpacing: -0.36, color: c('fg') }}>Welcome to Safe Spend</Text>
-            <Text style={{ fontSize: 14, color: c('fgMuted'), marginTop: 8, lineHeight: 21, textAlign: 'center', maxWidth: 300 }}>Your personal finance tracker. Let's get you set up in just a few steps.</Text>
-            <View style={{ marginTop: 24, padding: 16, backgroundColor: c('surfaceSecondary'), borderRadius: 12, gap: 10, alignSelf: 'stretch' }}>
-              {['Track income and expenses', 'Set budgets and goals', 'Get spending insights', 'Your data, securely stored'].map((t) => (
-                <View key={t} style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                  <View style={{ width: 20, height: 20, borderRadius: 9999, backgroundColor: c('income', 0.2), alignItems: 'center', justifyContent: 'center' }}>
-                    <Icon name="check" size={12} color={c('income')} stroke={2.5} />
-                  </View>
-                  <Text style={{ fontSize: 13, color: c('fg') }}>{t}</Text>
-                </View>
-              ))}
-            </View>
-          </View>
-        ) : null}
-
-        {/* Currency (only when the pre-auth welcome was skipped) */}
-        {name === 'Currency' ? (
-          <View>
-            <View style={{ alignItems: 'center', marginBottom: 16 }}>
-              <View style={{ width: 44, height: 44, borderRadius: 14, marginBottom: 10, backgroundColor: c('primary', 0.18), alignItems: 'center', justifyContent: 'center' }}>
-                <Icon name="wallet" size={20} color={c('primary')} />
-              </View>
-              <Text style={{ fontSize: 18, fontFamily: ff.semi, color: c('fg') }}>Choose your currency</Text>
-              <Text style={{ fontSize: 13, color: c('fgMuted'), marginTop: 4 }}>Select the currency you use most</Text>
-            </View>
-            <Input leading="search" placeholder="Search currencies…" value={search} onChange={setSearch} />
-            <View style={{ marginTop: 12, gap: 8 }}>
-              {filtered.map((cur) => {
-                const active = currency === cur.code;
-                return (
-                  <Pressable key={cur.code} onPress={() => setCurrency(cur.code)} style={{ paddingVertical: 12, paddingHorizontal: 14, borderRadius: 11, borderWidth: 2, borderColor: active ? c('primary') : c('border'), backgroundColor: active ? c('primary', 0.08) : c('surface'), flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-                      <Text style={[num(600), { fontSize: 18, width: 28, textAlign: 'center', color: c('fg') }]}>{cur.symbol}</Text>
-                      <View>
-                        <Text style={{ fontSize: 13, fontFamily: ff.med, color: c('fg') }}>{`${cur.country} — ${cur.code}`}</Text>
-                        <Text style={{ fontSize: 11, color: c('fgMuted'), marginTop: 1 }}>{cur.name}</Text>
-                      </View>
-                    </View>
-                    {active ? (
-                      <View style={{ width: 20, height: 20, borderRadius: 9999, backgroundColor: c('primary'), alignItems: 'center', justifyContent: 'center' }}>
-                        <Icon name="check" size={12} color="#fff" stroke={2.5} />
-                      </View>
-                    ) : null}
-                  </Pressable>
-                );
-              })}
-            </View>
-          </View>
-        ) : null}
-
-        {/* Primary account — one liquid account, correctly typed */}
-        {name === 'Account' ? (
-          <View>
-            <View style={{ alignItems: 'center', marginBottom: 16 }}>
-              <View style={{ width: 44, height: 44, borderRadius: 14, marginBottom: 10, backgroundColor: c('primary', 0.18), alignItems: 'center', justifyContent: 'center' }}>
-                <Icon name="wallet" size={20} color={c('primary')} />
-              </View>
-              <Text style={{ fontSize: 20, fontFamily: ff.bold, letterSpacing: -0.3, color: c('fg') }}>Where's your money?</Text>
-              <Text style={{ fontSize: 13, color: c('fgMuted'), marginTop: 4, textAlign: 'center' }}>Start with the account you spend from most.</Text>
-            </View>
-            <View style={{ gap: 10 }}>
-              {presets.map((p) => {
-                const active = preset === p.id;
-                return (
-                  <Pressable key={p.id} onPress={() => setPreset(p.id)} accessibilityRole="button" accessibilityState={{ selected: active }} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: 12, borderWidth: 2, borderColor: active ? c('primary') : c('border'), backgroundColor: active ? c('primary', 0.06) : c('surface') }}>
-                    <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: hsl(p.color, 0.2), alignItems: 'center', justifyContent: 'center' }}>
-                      <Icon name={p.icon} size={18} color={hsl(p.color)} />
-                    </View>
-                    <Text style={{ flex: 1, fontSize: 14, fontFamily: ff.med, color: c('fg') }}>{p.name}</Text>
-                    <View style={{ width: 22, height: 22, borderRadius: 9999, borderWidth: 2, borderColor: active ? c('primary') : c('fgMuted'), backgroundColor: active ? c('primary') : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
-                      {active ? <Icon name="check" size={12} color="#fff" stroke={2.5} /> : null}
-                    </View>
-                  </Pressable>
-                );
-              })}
-            </View>
-            <View style={{ marginTop: 16 }}>
-              <Text style={{ fontSize: 11, fontFamily: ff.semi, letterSpacing: 0.6, textTransform: 'uppercase', color: c('fgMuted'), marginBottom: 6 }}>How much is in it now?</Text>
-              <Input prefix={symbol} placeholder="0.00" keyboardType="decimal-pad" value={balance} onChange={setBalance} />
-            </View>
-            <Text style={{ fontSize: 11, color: c('fgMuted'), lineHeight: 16, marginTop: 10 }}>
-              You can add savings, cards and other accounts anytime from Accounts.
+      <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 20 }}>
+        <Rise key={step.id} y={8}>
+          <View style={{ alignItems: 'center', marginBottom: 20 }}>
+            <Text maxFontSizeMultiplier={1.3} style={{ fontSize: 21, fontFamily: ff.bold, letterSpacing: -0.4, color: c('fg'), textAlign: 'center' }}>
+              {step.title}
             </Text>
+            {step.subtitle ? (
+              <Text maxFontSizeMultiplier={1.3} style={{ fontSize: 13, color: c('fgMuted'), marginTop: 6, textAlign: 'center', lineHeight: 18 }}>
+                {step.subtitle}
+              </Text>
+            ) : null}
           </View>
-        ) : null}
-
-        {/* Monthly money — income is the focused ask; the bill is an optional add-on */}
-        {name === 'Money' ? (
-          <View>
-            <View style={{ alignItems: 'center', marginBottom: 16 }}>
-              <View style={{ width: 44, height: 44, borderRadius: 14, marginBottom: 10, backgroundColor: c('income', 0.18), alignItems: 'center', justifyContent: 'center' }}>
-                <Icon name="banknote" size={20} color={c('income')} />
-              </View>
-              <Text style={{ fontSize: 20, fontFamily: ff.bold, letterSpacing: -0.3, color: c('fg') }}>Money in, money out</Text>
-              <Text style={{ fontSize: 13, color: c('fgMuted'), marginTop: 4, textAlign: 'center' }}>Start with your income — that's all we need to work out what's safe to spend.</Text>
-            </View>
-
-            <Text style={{ fontSize: 11, fontFamily: ff.semi, letterSpacing: 0.6, textTransform: 'uppercase', color: c('fgMuted'), marginBottom: 6 }}>Monthly income</Text>
-            <Input prefix={symbol} placeholder="0.00" keyboardType="decimal-pad" value={income} onChange={setIncome} />
-            <View style={{ marginTop: 10 }}>
-              <Input label="Paid on which day of the month?" placeholder="e.g. 28" keyboardType="number-pad" value={payday} onChange={setPayday} />
-            </View>
-
-            {showBill ? (
-              <>
-                <View style={{ height: 1, backgroundColor: c('border'), marginVertical: 18 }} />
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <Text style={{ fontSize: 11, fontFamily: ff.semi, letterSpacing: 0.6, textTransform: 'uppercase', color: c('fgMuted') }}>Your biggest fixed bill</Text>
-                  <Text style={{ fontSize: 11, color: c('fgMuted') }}>Optional</Text>
-                </View>
-                <Input placeholder="e.g. Rent" value={billName} onChange={setBillName} />
-                <View style={{ marginTop: 10, flexDirection: 'row', gap: 10 }}>
-                  <View style={{ flex: 1.3 }}>
-                    <Input prefix={symbol} placeholder="0.00" keyboardType="decimal-pad" value={billAmount} onChange={setBillAmount} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Input placeholder="Due day" keyboardType="number-pad" value={billDay} onChange={setBillDay} />
-                  </View>
-                </View>
-                <Text style={{ fontSize: 11, color: c('fgMuted'), lineHeight: 16, marginTop: 10 }}>
-                  We'll track this as a recurring bill and remind you before it's due.
-                </Text>
-              </>
-            ) : (
-              <Pressable
-                onPress={() => setBillExpanded(true)}
-                accessibilityRole="button"
-                accessibilityLabel="Add your biggest fixed bill, optional"
-                style={({ pressed }) => [{ marginTop: 18, flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: c('border'), backgroundColor: c('surface') }, pressed && { opacity: 0.85 }]}
-              >
-                <View style={{ width: 32, height: 32, borderRadius: 9, backgroundColor: c('primary', 0.14), alignItems: 'center', justifyContent: 'center' }}>
-                  <Icon name="plus" size={16} color={c('primary')} stroke={2.5} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 14, fontFamily: ff.semi, color: c('fg') }}>Add your biggest fixed bill</Text>
-                  <Text style={{ fontSize: 11, color: c('fgMuted'), marginTop: 2, lineHeight: 15 }}>Rent, a loan… we'll remind you before it's due · optional</Text>
-                </View>
-              </Pressable>
-            )}
-          </View>
-        ) : null}
-
-        {/* Reveal — the payoff. A number the app worked out, not one they typed. */}
-        {name === 'Reveal' ? (
-          <View>
-            {reveal.hasInputs ? (
-              <>
-                <View style={{ alignItems: 'center', marginBottom: 4 }}>
-                  <Text style={{ fontSize: 13, color: c('fgMuted') }}>Here's where you stand</Text>
-                </View>
-                <View style={{ borderRadius: 16, backgroundColor: c('surface'), borderWidth: 1, borderColor: alpha(c('primary'), 0.4), padding: 18, marginTop: 10, overflow: 'hidden' }}>
-                  <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, backgroundColor: c('primary') }} />
-                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                    <Text style={{ fontSize: 14, fontFamily: ff.semi, color: c('fg') }}>Safe to Spend</Text>
-                    <Badge variant={reveal.status === 'danger' ? 'expense' : reveal.status === 'caution' ? 'warning' : 'income'}>
-                      {reveal.status === 'danger' ? 'Shortfall' : reveal.status === 'caution' ? 'Caution' : 'Healthy'}
-                    </Badge>
-                  </View>
-                  {/*
-                      * Counts up rather than appearing. This is the moment the
-                      * whole flow builds to, and a number that lands instantly
-                      * reads as a receipt. duration.slow with easing.decelerate
-                      * is what AnimatedNumber already uses -- the easing the
-                      * theme annotates as "things arriving (count-ups, fills)".
-                      */}
-                    <AnimatedNumber
-                      value={reveal.availableToSpend}
-                      format={m}
-                      numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}
-                      maxFontSizeMultiplier={1.3}
-                      style={[num(700), { fontSize: 38, letterSpacing: -0.5, color: c('primary') }]}
-                    />
-                  {reveal.dailySafe > 0 ? (
-                    <Text maxFontSizeMultiplier={1.3} style={[num(500), { fontSize: 13, color: c('primary'), marginTop: 4 }]}>
-                      {`≈ ${m(reveal.dailySafe)}/day for the next ${reveal.daysRemaining} day${reveal.daysRemaining === 1 ? '' : 's'}`}
-                    </Text>
-                  ) : null}
-                  <View style={{ marginTop: 14, paddingTop: 10, borderTopWidth: 1, borderTopColor: c('border', 0.6) }}>
-                    <BreakdownRow label="In your account" value={m(reveal.liquidBalance)} />
-                    {reveal.expectedIncomeThisMonth > 0 ? (
-                      <BreakdownRow label="Income still to come" value={m(reveal.expectedIncomeThisMonth)} tone={c('income')} sign="+" />
-                    ) : null}
-                    {reveal.unpaidBillsThisMonth > 0 ? (
-                      <BreakdownRow label="Bills still to pay" value={m(reveal.unpaidBillsThisMonth)} tone={c('expense')} sign="−" />
-                    ) : null}
-                  </View>
-                </View>
-                <Text style={{ fontSize: 12, color: c('fgMuted'), lineHeight: 18, marginTop: 14, textAlign: 'center' }}>
-                  This updates itself as you log spending. {intent && INTENT_LINE[intent] ? INTENT_LINE[intent] : ''}
-                </Text>
-              </>
-            ) : (
-              <View style={{ alignItems: 'center', paddingTop: 20 }}>
-                <View style={[{ width: 72, height: 72, borderRadius: 9999, marginBottom: 18, backgroundColor: c('income', 0.2), alignItems: 'center', justifyContent: 'center' }, glow(c('income'), 0.4)]}>
-                  <Icon name="sparkles" size={32} color={c('income')} />
-                </View>
-                <Text style={{ fontSize: 24, fontFamily: ff.bold, letterSpacing: -0.36, color: c('fg') }}>You're all set!</Text>
-                {intent && INTENT_LINE[intent] ? (
-                  <Text style={{ fontSize: 14, fontFamily: ff.semi, color: c('primary'), marginTop: 6, textAlign: 'center' }}>{INTENT_LINE[intent]}</Text>
-                ) : null}
-                <Text style={{ fontSize: 14, color: c('fgMuted'), marginTop: 8, lineHeight: 21, textAlign: 'center', maxWidth: 300 }}>
-                  Add a balance and your income whenever you're ready and Safe to Spend will come to life.
-                </Text>
-              </View>
-            )}
-          </View>
-        ) : null}
-
-        {/* Finishing touches: notification priming + biometric offer */}
-        {name === 'Alerts' ? (
-          <View>
-            <View style={{ alignItems: 'center', marginBottom: 16 }}>
-              <View style={{ width: 44, height: 44, borderRadius: 14, marginBottom: 10, backgroundColor: c('primary', 0.18), alignItems: 'center', justifyContent: 'center' }}>
-                <Icon name="bell" size={20} color={c('primary')} />
-              </View>
-              <Text style={{ fontSize: 18, fontFamily: ff.semi, color: c('fg') }}>A few finishing touches</Text>
-              <Text style={{ fontSize: 13, color: c('fgMuted'), marginTop: 4, textAlign: 'center' }}>Optional — you can change these anytime.</Text>
-            </View>
-            <View style={{ gap: 10 }}>
-              <OfferRow
-                icon="bell"
-                tone={c('primary')}
-                title="Bill reminders & budget alerts"
-                body={notifBlocked ? 'Notifications are turned off for SafeSpend. Re-enable them in Settings.' : 'Get a heads-up before a bill is due or you go over budget.'}
-                done={notifsOn}
-                actionLabel={notifBlocked ? 'Open settings' : 'Enable'}
-                onEnable={notifBlocked ? openSettings : enableNotifs}
-              />
-              {lockSupported ? (
-                <OfferRow
-                  icon="shield"
-                  tone={hsl('200 70% 50%')}
-                  title="Lock with biometrics"
-                  body={`Require your ${BIOMETRIC_LABEL} to open SafeSpend.`}
-                  done={lockOn}
-                  onEnable={enableLock}
-                />
-              ) : null}
-            </View>
-          </View>
-        ) : null}
+          {body()}
+        </Rise>
       </ScrollView>
 
-        {/* First expense — one real entry, so the dashboard is never empty */}
-      {name === 'First expense' ? (
-        <View style={{ gap: 14 }}>
-          <View style={{ alignItems: 'center' }}>
-            <View style={{ width: 44, height: 44, borderRadius: 14, marginBottom: 10, backgroundColor: c('primary', 0.18), alignItems: 'center', justifyContent: 'center' }}>
-              <Icon name="receipt" size={20} color={c('primary')} />
+      {/* The compute step advances itself; a button would invite a tap racing
+          the timer. */}
+      {step.kind !== 'compute' ? (
+        <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
+          {index > 0 ? (
+            <View style={{ flex: 1 }}>
+              <Button block size="lg" variant="outline" onPress={() => setIndex((i) => i - 1)}>Back</Button>
             </View>
-            <Text style={{ fontSize: 20, fontFamily: ff.bold, letterSpacing: -0.3, color: c('fg') }}>Log one thing you spent</Text>
-            <Text style={{ fontSize: 13, color: c('fgMuted'), marginTop: 4, textAlign: 'center' }}>
-              Anything at all — a coffee will do. This is the habit the whole app runs on.
-            </Text>
+          ) : null}
+          <View style={{ flex: index > 0 ? 1.4 : 1 }}>
+            <Button block size="lg" onPress={next} disabled={!canContinue}
+              icon={isLast ? 'sparkles' : undefined}>
+              {isLast
+                ? (numOr0(firstAmount) > 0 ? 'Save and finish' : 'Skip for now')
+                : step.id === 'income' ? 'See what that means'
+                : 'Continue'}
+            </Button>
           </View>
-          <View>
-            <Text style={{ fontSize: 11, fontFamily: ff.semi, letterSpacing: 0.6, textTransform: 'uppercase', color: c('fgMuted'), marginBottom: 6 }}>Amount</Text>
-            <Input prefix={symbol} placeholder="0.00" keyboardType="decimal-pad" value={firstAmount} onChange={setFirstAmount} />
-          </View>
-          <Input label="What was it?" placeholder="e.g. Coffee" value={firstDescription} onChange={setFirstDescription} />
-          <Text style={{ fontSize: 11, color: c('fgMuted'), lineHeight: 16, textAlign: 'center' }}>
-            You can skip this, but people who log something on day one are the ones who keep going.
-          </Text>
         </View>
       ) : null}
 
-      {/* Footer */}
-      <View style={{ flexDirection: 'row', gap: 10, marginTop: 22 }}>
-        {step > 0 ? <View style={{ flex: 1 }}><Button block size="lg" variant="outline" onPress={() => setStep(step - 1)}>Back</Button></View> : null}
-        <View style={{ flex: step > 0 ? 1.4 : 1 }}>
-          <Button block size="lg" icon={step === STEPS.length - 1 ? 'sparkles' : undefined} onPress={next} disabled={!canContinue}>
-            {step === STEPS.length - 1 ? (numOr0(firstAmount) > 0 ? 'Save and finish' : 'Skip for now') : name === 'Reveal' ? 'Continue' : name === 'Money' ? 'See my number' : 'Continue'}
-          </Button>
-        </View>
-      </View>
-      {step === 0 ? (
+      {index === 0 ? (
         <Pressable onPress={skip} style={{ marginTop: 8, padding: 8, alignItems: 'center' }}>
-          <Text style={{ color: c('fgMuted'), fontSize: 12 }}>Skip setup, I'll configure later</Text>
+          <Text style={{ color: c('fgMuted'), fontSize: 12 }}>Skip setup, I’ll configure later</Text>
         </Pressable>
       ) : null}
     </View>
   );
+}
+
+function Row({ label, value, tone }) {
+  return (
+    <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12 }}>
+      <Text maxFontSizeMultiplier={1.3} style={{ fontSize: 13, color: c('fgMuted') }}>{label}</Text>
+      <Text maxFontSizeMultiplier={1.3} style={[num(600), { fontSize: 13, color: tone || c('fg') }]}>{value}</Text>
+    </View>
+  );
+}
+
+/** Next occurrence of a day-of-month, as YYYY-MM-DD, clamped to month length. */
+function nextDue(day) {
+  const now = new Date();
+  const d = Math.min(Math.max(1, Math.floor(day) || 1), 31);
+  let year = now.getFullYear();
+  let month = now.getMonth();
+  if (d <= now.getDate()) {
+    month += 1;
+    if (month > 11) { month = 0; year += 1; }
+  }
+  const clamped = Math.min(d, new Date(year, month + 1, 0).getDate());
+  return `${year}-${String(month + 1).padStart(2, '0')}-${String(clamped).padStart(2, '0')}`;
 }

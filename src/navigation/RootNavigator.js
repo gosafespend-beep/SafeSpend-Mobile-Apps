@@ -542,7 +542,7 @@ export default function RootNavigator() {
   const dismissTour = () => { setTourOpen(false); AsyncStorage.setItem('pref_tour_seen', 'true').catch(() => {}); };
   const replayTour = () => { track('tour_open'); setTourOpen(true); };
 
-  const handleOnboardingComplete = async ({ currency, accounts, recurringIncome, bill, firstExpense }) => {
+  const handleOnboardingComplete = async ({ currency, accounts, recurringIncome, bill, categories, goal, debt, firstExpense }) => {
     // Create the starter accounts BEFORE marking onboarding complete, so a failed
     // insert never lands the user on an empty dashboard they can't re-trigger.
     if (accounts && accounts.length && session?.user) {
@@ -611,6 +611,40 @@ export default function RootNavigator() {
         // which would otherwise chase someone who already started.
         AsyncStorage.setItem('first_txn_logged', 'true').catch(() => {});
         cancelActivationNudge();
+      }
+      /*
+       * The categories someone says catch them out become tracked categories,
+       * so the dashboard is about their spending rather than a generic list.
+       * This is what makes the question worth asking -- an answer the product
+       * does not use is worse than no question.
+       */
+      if (categories && categories.length) {
+        await supabase.from('categories').insert(
+          categories.map((name) => ({ user_id: session.user.id, name, type: 'expense' }))
+        ).then(({ error: e }) => { if (e && __DEV__) console.warn('[onboarding] categories:', e.message); });
+      }
+
+      if (goal) {
+        const deadline = new Date();
+        deadline.setMonth(deadline.getMonth() + goal.months);
+        await supabase.from('savings_goals').insert({
+          user_id: session.user.id,
+          name: goal.name,
+          target_amount: goal.target,
+          current_amount: 0,
+          deadline: deadline.toISOString().split('T')[0],
+          currency,
+        }).then(({ error: e }) => { if (e && __DEV__) console.warn('[onboarding] goal:', e.message); });
+      }
+
+      if (debt) {
+        await supabase.from('debts').insert({
+          user_id: session.user.id,
+          name: debt.name,
+          balance: debt.amount,
+          original_amount: debt.amount,
+          currency,
+        }).then(({ error: e }) => { if (e && __DEV__) console.warn('[onboarding] debt:', e.message); });
       }
     }
     await completeOnboarding(currency);

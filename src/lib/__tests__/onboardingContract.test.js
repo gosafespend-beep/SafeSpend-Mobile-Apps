@@ -16,6 +16,7 @@ const path = require('path');
  */
 
 const contract = require('../onboardingContract');
+const sequence = require('../onboardingSteps');
 
 const src = (rel) => fs.readFileSync(path.resolve(__dirname, '..', '..', rel), 'utf8');
 const screen = src('screens/OnboardingScreen.js');
@@ -23,32 +24,38 @@ const welcome = src('screens/WelcomeScreen.js');
 const navigator = src('navigation/RootNavigator.js');
 
 describe('onboarding contract — steps', () => {
-  it('declares the same step list the screen uses', () => {
-    const declared = screen.match(/const STEPS_FULL = \[(.*?)\];/s)[1];
+  it('implements every step the contract declares', () => {
+    // The screen renders by id, so each contract step must have a case.
     contract.STEPS_FULL.forEach((step) => {
-      expect(declared).toContain(`'${step}'`);
+      expect(screen).toContain(`case '${step}':`);
     });
+  });
+
+  it('defines the same sequence the contract does', () => {
+    expect(sequence.STEP_DEFS.map((s) => s.id)).toEqual([...contract.STEPS_FULL]);
   });
 
   it('ends on the first expense, not on a congratulation', () => {
     // Both flows used to hand over a dashboard and hope. 34 of 37 accounts
     // have never recorded a transaction.
     const last = contract.STEPS_FULL[contract.STEPS_FULL.length - 1];
-    expect(last).toBe('First expense');
-    expect(contract.STEPS_FROM_WELCOME[contract.STEPS_FROM_WELCOME.length - 1]).toBe('First expense');
-    expect(screen).toContain("name === 'First expense'");
+    expect(last).toBe('first-what');
+    expect(contract.STEPS_FULL).toContain('first-amount');
+    expect(screen).toContain("case 'first-amount':");
   });
 
   it('keeps Alerts after the Reveal', () => {
     // Asking for notification permission before the user has anything to be
     // notified about is the weakest possible moment to ask.
     const steps = contract.STEPS_FULL;
-    expect(steps.indexOf('Alerts')).toBeGreaterThan(steps.indexOf('Reveal'));
+    expect(steps.indexOf('alerts')).toBeGreaterThan(steps.indexOf('reveal'));
+    // And it is the only mobile-only screen, per the platform split.
+    expect(sequence.STEP_DEFS.filter((x) => x.platform).map((x) => x.id)).toEqual(['alerts']);
   });
 
   it('asks for income, which is what the product computes from', () => {
     expect(contract.REQUIRED_FIELDS.map((f) => f.field)).toContain('income');
-    expect(screen).toContain('Monthly income');
+    expect(screen).toContain("case 'income':");
   });
 });
 
@@ -102,7 +109,7 @@ describe('onboarding contract — versioning', () => {
     // The tripwire for the gap a mirrored contract cannot close on its own:
     // two repos, two toolchains, no shared package. A different number on the
     // other side means one was edited alone.
-    expect(contract.CONTRACT_VERSION).toBe(2);
+    expect(contract.CONTRACT_VERSION).toBe(3);
   });
 });
 
@@ -141,8 +148,8 @@ describe('onboarding contract — feel', () => {
      */
     expect(contract.NO_CELEBRATION_ON).toBe('danger');
     const revealHaptic = screen.slice(
-      screen.indexOf("if (name === 'Reveal'"),
-      screen.indexOf("if (name === 'Reveal'") + 120,
+      screen.indexOf("step.id === 'reveal'"),
+      screen.indexOf("step.id === 'reveal'") + 140,
     );
     expect(revealHaptic).toContain('haptics.impact()');
     expect(revealHaptic).not.toContain('haptics.success()');
