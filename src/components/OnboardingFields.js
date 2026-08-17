@@ -69,7 +69,7 @@ export function DayField({ value, onChange, reflection }) {
   const today = new Date().getDate();
   return (
     <View>
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, justifyContent: 'center' }}>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 5, justifyContent: 'center' }}>
         {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => {
           const selected = value === day;
           return (
@@ -80,7 +80,7 @@ export function DayField({ value, onChange, reflection }) {
               accessibilityState={{ selected }}
               accessibilityLabel={`Day ${day}`}
               style={{
-                width: 40, height: 40, borderRadius: 10,
+                width: 44, height: 44, borderRadius: 11,
                 alignItems: 'center', justifyContent: 'center',
                 backgroundColor: selected ? c('primary') : c('surfaceSecondary'),
                 borderWidth: !selected && day === today ? 1 : 0,
@@ -158,7 +158,7 @@ export function MultiField({ options, values, onToggle, reflection }) {
               accessibilityRole="button"
               accessibilityState={{ selected }}
               style={{
-                paddingHorizontal: 14, paddingVertical: 9, borderRadius: 999, borderWidth: 2,
+                paddingHorizontal: 14, paddingVertical: 9, minHeight: 44, justifyContent: 'center', borderRadius: 999, borderWidth: 2,
                 borderColor: selected ? c('primary') : c('border'),
                 backgroundColor: selected ? alpha(c('primary'), 0.1) : 'transparent',
               }}
@@ -227,7 +227,7 @@ export function NameField({ value, onChange, placeholder, suggestions = [], auto
               accessibilityRole="button"
               accessibilityState={{ selected }}
               style={{
-                paddingHorizontal: 14, paddingVertical: 10, borderRadius: 999, borderWidth: 2,
+                paddingHorizontal: 14, paddingVertical: 10, minHeight: 44, justifyContent: 'center', borderRadius: 999, borderWidth: 2,
                 borderColor: selected ? c('primary') : c('border'),
                 backgroundColor: selected ? alpha(c('primary'), 0.1) : 'transparent',
               }}

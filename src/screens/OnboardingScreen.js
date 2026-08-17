@@ -525,7 +525,10 @@ export default function OnboardingScreen({ onComplete, topInset = 0, initialCurr
       {/* The compute step advances itself; a button would invite a tap racing
           the timer. */}
       {step.kind !== 'compute' ? (
-        <View style={{ flexDirection: 'row', gap: 10, marginTop: 12, paddingHorizontal: 20 }}>
+        <View style={{ flexDirection: 'row', gap: 10, paddingTop: 14, marginTop: 4, paddingHorizontal: 20,
+          // Hairline over the button band, as on web: it marks where the
+          // scrolling content ends rather than letting the last row look cut off.
+          borderTopWidth: 1, borderTopColor: alpha(c('border'), 0.6) }}>
           {index > 0 ? (
             <View style={{ flex: 1 }}>
               <Button block size="lg" variant="outline" onPress={() => setIndex((i) => i - 1)}>Back</Button>
