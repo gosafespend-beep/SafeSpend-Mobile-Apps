@@ -23,8 +23,12 @@ const logo = require('../../assets/logo-shield.png');
 // Steps when the user came through the pre-auth welcome (intro + currency already
 // answered there). `Reveal` replaces the old static "Ready" slide: instead of
 // telling the user they're set up, it shows the number the app just worked out.
-const STEPS_FROM_WELCOME = ['Account', 'Money', 'Reveal', 'Alerts'];
-const STEPS_FULL = ['Welcome', 'Currency', 'Account', 'Money', 'Reveal', 'Alerts'];
+// 'First expense' is last on purpose. The flow used to end on Alerts and hand
+// over a dashboard — and 34 of 37 accounts have never recorded a transaction.
+// Nobody should arrive having entered nothing. Mirrors the web flow; see
+// src/lib/onboardingContract.js.
+const STEPS_FROM_WELCOME = ['Account', 'Money', 'Reveal', 'Alerts', 'First expense'];
+const STEPS_FULL = ['Welcome', 'Currency', 'Account', 'Money', 'Reveal', 'Alerts', 'First expense'];
 
 // A one-line nod to the goal the user picked in the pre-auth welcome.
 const INTENT_LINE = {
@@ -87,6 +91,8 @@ export default function OnboardingScreen({ onComplete, topInset = 0, initialCurr
   const { region } = useRegion();
   const STEPS = fromWelcome ? STEPS_FROM_WELCOME : STEPS_FULL;
   const [step, setStep] = useState(0);
+  const [firstAmount, setFirstAmount] = useState('');
+  const [firstDescription, setFirstDescription] = useState('');
   const [currency, setCurrency] = useState(initialCurrency || 'USD');
   const [search, setSearch] = useState('');
   // Primary account
@@ -254,6 +260,12 @@ export default function OnboardingScreen({ onComplete, topInset = 0, initialCurr
     const bill = billAmt > 0
       ? { name: billName.trim() || 'Fixed bill', amount: billAmt, due_day: dayOr(billDay, 1) }
       : null;
+    const firstAmt = numOr0(firstAmount);
+    const firstExpense = firstAmt > 0
+      ? { amount: firstAmt, description: firstDescription.trim() || 'First expense' }
+      : null;
+    if (firstExpense) track('first_transaction', { where: 'onboarding', amount: firstAmt });
+
     track('onboarding_complete', {
       currency, intent: intent || null, notifsOn, lockOn,
       accountType: chosen.type, hasBalance: bal > 0, hasIncome: !!recurringIncome, hasBill: !!bill,
@@ -531,12 +543,35 @@ export default function OnboardingScreen({ onComplete, topInset = 0, initialCurr
         ) : null}
       </ScrollView>
 
+        {/* First expense — one real entry, so the dashboard is never empty */}
+      {name === 'First expense' ? (
+        <View style={{ gap: 14 }}>
+          <View style={{ alignItems: 'center' }}>
+            <View style={{ width: 44, height: 44, borderRadius: 14, marginBottom: 10, backgroundColor: c('primary', 0.18), alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name="receipt" size={20} color={c('primary')} />
+            </View>
+            <Text style={{ fontSize: 20, fontFamily: ff.bold, letterSpacing: -0.3, color: c('fg') }}>Log one thing you spent</Text>
+            <Text style={{ fontSize: 13, color: c('fgMuted'), marginTop: 4, textAlign: 'center' }}>
+              Anything at all — a coffee will do. This is the habit the whole app runs on.
+            </Text>
+          </View>
+          <View>
+            <Text style={{ fontSize: 11, fontFamily: ff.semi, letterSpacing: 0.6, textTransform: 'uppercase', color: c('fgMuted'), marginBottom: 6 }}>Amount</Text>
+            <Input prefix={symbol} placeholder="0.00" keyboardType="decimal-pad" value={firstAmount} onChange={setFirstAmount} />
+          </View>
+          <Input label="What was it?" placeholder="e.g. Coffee" value={firstDescription} onChange={setFirstDescription} />
+          <Text style={{ fontSize: 11, color: c('fgMuted'), lineHeight: 16, textAlign: 'center' }}>
+            You can skip this, but people who log something on day one are the ones who keep going.
+          </Text>
+        </View>
+      ) : null}
+
       {/* Footer */}
       <View style={{ flexDirection: 'row', gap: 10, marginTop: 22 }}>
         {step > 0 ? <View style={{ flex: 1 }}><Button block size="lg" variant="outline" onPress={() => setStep(step - 1)}>Back</Button></View> : null}
         <View style={{ flex: step > 0 ? 1.4 : 1 }}>
           <Button block size="lg" icon={step === STEPS.length - 1 ? 'sparkles' : undefined} onPress={next} disabled={!canContinue}>
-            {step === STEPS.length - 1 ? 'Start using Safe Spend' : name === 'Reveal' ? 'Continue' : name === 'Money' ? 'See my number' : 'Continue'}
+            {step === STEPS.length - 1 ? (numOr0(firstAmount) > 0 ? 'Save and finish' : 'Skip for now') : name === 'Reveal' ? 'Continue' : name === 'Money' ? 'See my number' : 'Continue'}
           </Button>
         </View>
       </View>

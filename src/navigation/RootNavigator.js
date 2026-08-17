@@ -542,7 +542,7 @@ export default function RootNavigator() {
   const dismissTour = () => { setTourOpen(false); AsyncStorage.setItem('pref_tour_seen', 'true').catch(() => {}); };
   const replayTour = () => { track('tour_open'); setTourOpen(true); };
 
-  const handleOnboardingComplete = async ({ currency, accounts, recurringIncome, bill }) => {
+  const handleOnboardingComplete = async ({ currency, accounts, recurringIncome, bill, firstExpense }) => {
     // Create the starter accounts BEFORE marking onboarding complete, so a failed
     // insert never lands the user on an empty dashboard they can't re-trigger.
     if (accounts && accounts.length && session?.user) {
@@ -586,6 +586,31 @@ export default function RootNavigator() {
           frequency: 'monthly',
           is_active: true,
         }).then(({ error: e }) => { if (e && __DEV__) console.warn('[onboarding] bill seed:', e.message); });
+      }
+
+      // The first expense, if they logged one. Best-effort like the seeds
+      // above: failing to record it must never block finishing setup.
+      //
+      // This is the step aimed at the actual problem — 34 of 37 accounts have
+      // never recorded a transaction — so it is the one row here whose absence
+      // would matter most.
+      if (firstExpense) {
+        await supabase.from('expenses').insert({
+          user_id: session.user.id,
+          amount: firstExpense.amount,
+          description: firstExpense.description,
+          category: 'Other',
+          date: new Date().toISOString().split('T')[0],
+          account_id: accountId,
+          currency,
+        }).then(({ error: e }) => { if (e && __DEV__) console.warn('[onboarding] first expense:', e.message); });
+
+        // Mark activation here, or onFirstSaveCheck fires first_transaction
+        // again on the NEXT save — double-counting the one metric this whole
+        // change exists to move. Also cancels the "come back and finish" nudge,
+        // which would otherwise chase someone who already started.
+        AsyncStorage.setItem('first_txn_logged', 'true').catch(() => {});
+        cancelActivationNudge();
       }
     }
     await completeOnboarding(currency);
